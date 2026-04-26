@@ -1,0 +1,70 @@
+name: Project Takashi CI/CD
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: trader
+          POSTGRES_PASSWORD: secret
+          POSTGRES_DB: trading
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          cd bot
+          pip install -r requirements.txt
+
+      - name: Run tests
+        env:
+          DB_URL: postgresql://trader:secret@localhost:5432/trading
+          MODE: PAPER
+          BINANCE_API_KEY: ""
+          BINANCE_SECRET: ""
+          TELEGRAM_TOKEN: ""
+          TELEGRAM_CHAT_ID: ""
+        run: |
+          cd bot
+          pytest tests/ -v --tb=short
+
+  build:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: |
+          cd bot
+          docker build -t project-takashi:latest .
+
+      - name: Verify image
+        run: docker images project-takashi

@@ -1,0 +1,74 @@
+version: '3.9'
+
+services:
+
+  bot:
+    build: .
+    container_name: kotegawa_bot
+    restart: always
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+      - ./models:/app/models
+      - ./reports:/app/reports
+    networks:
+      - takashi_net
+
+  dashboard:
+    build: .
+    container_name: takashi_dashboard
+    command: streamlit run dashboard/app.py --server.port 8501 --server.address 0.0.0.0
+    restart: always
+    env_file:
+      - .env
+    ports:
+      - "8501:8501"
+    depends_on:
+      - db
+    networks:
+      - takashi_net
+
+  api:
+    build: .
+    container_name: takashi_api
+    command: uvicorn api.server:app --host 0.0.0.0 --port 8000
+    restart: always
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+    networks:
+      - takashi_net
+
+  db:
+    image: postgres:15-alpine
+    container_name: takashi_db
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-trader}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secret}
+      POSTGRES_DB: ${POSTGRES_DB:-trading}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-trader}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - takashi_net
+
+volumes:
+  pg_data:
+
+networks:
+  takashi_net:
+    driver: bridge
