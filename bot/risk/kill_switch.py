@@ -1,3 +1,4 @@
+from typing import Optional
 """
 Global kill switch — monitors drawdown and halts the entire system
 when the portfolio drawdown exceeds the configured threshold.
@@ -9,7 +10,7 @@ from core.logger import logger
 
 
 class KillSwitch:
-    def __init__(self, max_drawdown: float | None = None):
+    def __init__(self, max_drawdown: Optional[float] = None):
         self.max_drawdown = max_drawdown or settings.MAX_DRAWDOWN
         self.peak_equity: float = 0.0
         self.triggered: bool = False

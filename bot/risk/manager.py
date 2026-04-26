@@ -1,3 +1,4 @@
+from typing import Optional
 """
 Risk manager — position sizing and trade permission gate.
 Called before every execution decision.
@@ -10,8 +11,8 @@ from core.logger import logger
 def position_size(
     balance: float,
     price: float,
-    risk_pct: float | None = None,
-    stop_pct: float | None = None,
+    risk_pct: Optional[float] = None,
+    stop_pct: Optional[float] = None,
 ) -> float:
     """
     Risk-based position size.
@@ -29,7 +30,7 @@ def position_size(
 
 def lot_size_fx(
     balance: float,
-    risk_pct: float | None = None,
+    risk_pct: Optional[float] = None,
     stop_pips: float = 20.0,
     pip_value: float = 10.0,
 ) -> float:

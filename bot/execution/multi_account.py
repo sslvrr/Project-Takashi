@@ -4,7 +4,7 @@ Accounts are loaded from environment (or overridden in tests).
 """
 
 import os
-from typing import Any
+from typing import Optional, Any
 from core.logger import logger
 
 try:
@@ -31,7 +31,7 @@ def _load_accounts() -> list[dict]:
 _ACCOUNTS = _load_accounts()
 
 
-def execute_all(symbol: str, size: float, orderbook: dict | None = None) -> list[dict]:
+def execute_all(symbol: str, size: float, orderbook: Optional[dict] = None) -> list[dict]:
     """
     Place the same order across all configured sub-accounts.
     Returns list of order results.

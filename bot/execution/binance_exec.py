@@ -1,3 +1,4 @@
+from typing import Optional
 """
 Live Binance execution engine (XRP/USDT).
 Only activated when MODE=LIVE and API keys are configured.
@@ -30,7 +31,7 @@ class BinanceExecutor:
         self,
         symbol: str,
         size: float,
-        orderbook: dict | None = None,
+        orderbook: Optional[dict] = None,
         tp_pct: float = 0.02,
         sl_pct: float = 0.015,
     ) -> dict:

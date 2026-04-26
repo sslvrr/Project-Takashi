@@ -1,3 +1,4 @@
+from typing import Optional
 """
 Slippage and spread model — used in both paper and live execution
 to compute realistic fill prices and decide limit vs market entry.
@@ -16,7 +17,7 @@ def apply_slippage(
     price: float,
     is_buy: bool = True,
     asset: str = "XRP",
-    spread: float | None = None,
+    spread: Optional[float] = None,
 ) -> float:
     """
     Return realistic fill price including spread and slippage.

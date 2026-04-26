@@ -6,7 +6,7 @@ Uses @depth@100ms for 100 ms update frequency (near-tick resolution).
 import asyncio
 import json
 from collections import deque
-from typing import Callable, Awaitable
+from typing import Optional, Callable, Awaitable
 
 import websockets
 from websockets.exceptions import ConnectionClosed
@@ -26,7 +26,7 @@ _ohlcv_buffer: deque = deque(maxlen=500)
 
 async def stream_orderbook(
     symbol: str = "xrpusdt",
-    callback: Callable[[dict], Awaitable[None]] | None = None,
+    callback: Optional[Callable[[dict], Awaitable[None]]] = None,
 ) -> None:
     """Stream level-2 order book snapshots and call callback on each update."""
     url = DEPTH_URL.format(symbol=symbol.lower())
@@ -52,7 +52,7 @@ async def stream_orderbook(
 async def stream_klines(
     symbol: str = "xrpusdt",
     interval: str = "5m",
-    callback: Callable[[dict], Awaitable[None]] | None = None,
+    callback: Optional[Callable[[dict], Awaitable[None]]] = None,
 ) -> None:
     """Stream closed kline (OHLCV) data and buffer locally."""
     url = KLINE_URL.format(symbol=symbol.lower(), interval=interval)
@@ -87,7 +87,7 @@ async def stream_klines(
 
 async def stream_ticker(
     symbol: str = "xrpusdt",
-    callback: Callable[[dict], Awaitable[None]] | None = None,
+    callback: Optional[Callable[[dict], Awaitable[None]]] = None,
 ) -> None:
     """Stream 24h ticker for price change / volume context."""
     url = TICKER_URL.format(symbol=symbol.lower())
