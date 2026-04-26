@@ -114,7 +114,8 @@ class TradingEngine:
             equity = current_equity()
 
             # All risk gates
-            pnl_series = []  # TODO: wire to per-session list
+            from core.performance import get_pnl_series
+            pnl_series = get_pnl_series()
             if not allow_trade(pnl_series):
                 logger.warning(f"[engine] Cluster filter blocked {asset} trade.")
                 continue

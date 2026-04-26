@@ -12,7 +12,7 @@ from typing import Optional
 class PerformanceTracker:
     trades: list[float] = field(default_factory=list)
     equity_curve: list[float] = field(default_factory=list)
-    _start_equity: float = 10_000.0
+    _start_equity: float = 1_000.0
 
     def record(self, pnl: float) -> None:
         self.trades.append(pnl)

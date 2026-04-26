@@ -186,3 +186,92 @@ def ml_status():
 def recent_signals(limit: int = 50):
     """Recent signal evaluations — both passed and vetoed."""
     return {"signals": list(_signal_feed)[:limit]}
+
+
+@app.get("/go-live/status")
+def go_live_status():
+    """Check whether performance meets the live-trading deployment gates."""
+    from core.performance import get_metrics, get_equity_curve
+    from core.deployment import can_go_live
+    from core.metrics import max_drawdown
+    m = get_metrics()
+    eq = get_equity_curve()
+    dd = max_drawdown(eq) if eq else 0.0
+    perf = {
+        "trades":       m.get("trades", 0),
+        "win_rate":     m.get("win_rate", 0.0),
+        "pnl":          m.get("pnl", 0.0),
+        "max_drawdown": dd,
+        "profit_factor": m.get("profit_factor", 0.0),
+    }
+    ready, reasons = can_go_live(perf)
+    return {"ready": ready, "reasons": reasons, "metrics": perf}
+
+
+@app.get("/risk/summary")
+def risk_summary_endpoint():
+    """Live risk snapshot — drawdown, exposure, daily loss consumed."""
+    from core.performance import get_equity_curve, get_pnl_series
+    from core.metrics import max_drawdown
+    from config.settings import settings
+    eq = get_equity_curve()
+    pnl = get_pnl_series()
+    dd = max_drawdown(eq) if eq else 0.0
+    total_exposure = sum(p.get("size", 0) for p in _positions_state)
+    by_asset: dict = {}
+    for p in _positions_state:
+        sym = p.get("symbol", "?")
+        by_asset[sym] = round(by_asset.get(sym, 0) + p.get("size", 0), 4)
+    today_pnl = sum(pnl[-50:]) if pnl else 0.0
+    return {
+        "max_drawdown":       round(dd, 4),
+        "total_exposure":     round(total_exposure, 4),
+        "exposure_by_asset":  by_asset,
+        "today_pnl":          round(today_pnl, 4),
+        "daily_loss_limit":   settings.MAX_DAILY_LOSS,
+        "daily_loss_used_pct": round(abs(min(today_pnl, 0)) / settings.MAX_DAILY_LOSS * 100, 1) if today_pnl < 0 else 0.0,
+        "open_positions":     len(_positions_state),
+        "max_positions":      settings.MAX_CONCURRENT_POSITIONS,
+    }
+
+
+@app.get("/health/detail")
+def health_detail():
+    """Detailed health — heartbeat age, alive status, uptime."""
+    from core.health import check_health, seconds_since_heartbeat
+    h = check_health(timeout_seconds=180)
+    return {
+        **h,
+        "seconds_since_heartbeat": round(seconds_since_heartbeat(), 1),
+        "start_time": _system_state.get("start_time"),
+        "running": _system_state.get("running", False),
+    }
+
+
+@app.get("/arbitrage")
+def arbitrage():
+    """Cross-exchange price comparison (Coinbase vs Kraken)."""
+    try:
+        from data.multi_exchange import check_arbitrage
+        return check_arbitrage("XRP/USD")
+    except Exception as exc:
+        return {"error": str(exc), "coinbase": 0, "kraken": 0, "spread_pct": 0, "opportunity": False}
+
+
+@app.get("/monthly/report")
+def get_monthly_report():
+    """Generate monthly performance report."""
+    from core.performance import get_pnl_series
+    from reporting.monthly import monthly_report
+    pnl = get_pnl_series()
+    return {"report": monthly_report(pnl), "trades": len(pnl)}
+
+
+@app.post("/monthly/send")
+def send_monthly_report_endpoint():
+    """Generate and send monthly report via Telegram."""
+    from core.performance import get_pnl_series
+    from reporting.monthly import send_monthly_report
+    pnl = get_pnl_series()
+    send_monthly_report(pnl)
+    return {"status": "sent", "trades": len(pnl)}
