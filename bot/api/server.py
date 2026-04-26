@@ -4,6 +4,7 @@ Exposes health, system status, control endpoints, and investor metrics.
 Run with: uvicorn api.server:app --host 0.0.0.0 --port 8000
 """
 
+from collections import deque
 from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,7 +27,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ─── Shared system state (injected at startup from main.py) ──────────────────
+# ─── Shared system state ──────────────────────────────────────────────────────
 _system_state: dict = {
     "mode": settings.MODE,
     "running": True,
@@ -36,12 +37,46 @@ _system_state: dict = {
     "start_time": datetime.now(timezone.utc).isoformat(),
 }
 
+_positions_state: list = []
+
+_ml_state: dict = {
+    "trained": False,
+    "samples": 0,
+    "top_features": {},
+    "last_retrain": None,
+}
+
+_signal_feed: deque = deque(maxlen=100)
+
+
+# ─── State updaters (called from main.py / engine) ────────────────────────────
 
 def update_state(**kwargs) -> None:
     _system_state.update(kwargs)
 
 
-# ─── Endpoints ────────────────────────────────────────────────────────────────
+def update_positions(positions: list) -> None:
+    global _positions_state
+    _positions_state = positions
+
+
+def update_ml_status(trained: bool, samples: int, top_features: dict) -> None:
+    _ml_state.update({
+        "trained": trained,
+        "samples": samples,
+        "top_features": top_features,
+        "last_retrain": datetime.now(timezone.utc).isoformat() if trained else _ml_state.get("last_retrain"),
+    })
+
+
+def push_signal(signal_info: dict) -> None:
+    _signal_feed.appendleft({
+        **signal_info,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+
+
+# ─── Core endpoints ───────────────────────────────────────────────────────────
 
 @app.get("/health")
 def health():
@@ -99,7 +134,6 @@ def toggle_asset(body: AssetToggle):
 
 @app.get("/metrics")
 def metrics():
-    """Live performance metrics — wired to actual tracker in core/performance.py."""
     from core.performance import get_metrics
     return get_metrics()
 
@@ -132,3 +166,23 @@ def recent_trades(limit: int = 20):
 def latency():
     from core.latency import get_latency_report
     return get_latency_report()
+
+
+# ─── New endpoints ────────────────────────────────────────────────────────────
+
+@app.get("/positions")
+def get_positions():
+    """Open paper positions from the live broker."""
+    return {"positions": _positions_state}
+
+
+@app.get("/ml/status")
+def ml_status():
+    """ML model training status and feature importance."""
+    return _ml_state
+
+
+@app.get("/signals/recent")
+def recent_signals(limit: int = 50):
+    """Recent signal evaluations — both passed and vetoed."""
+    return {"signals": list(_signal_feed)[:limit]}

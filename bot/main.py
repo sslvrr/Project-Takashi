@@ -43,7 +43,7 @@ from risk.kill_switch import KillSwitch
 from strategy.model_lgbm import LGBMModel
 from strategy.training_pipeline import run_training
 
-from api.server import app as fastapi_app, update_state
+from api.server import app as fastapi_app, update_state, update_positions, update_ml_status
 import uvicorn
 
 
@@ -119,7 +119,12 @@ async def model_retrain_loop() -> None:
         logger.info("[main] Attempting model retrain…")
         success = run_training(FEATURE_STORE, MODEL, min_samples=100)
         if success:
+            from strategy.features import FEATURE_NAMES
+            imp = MODEL.feature_importance(FEATURE_NAMES)
+            update_ml_status(MODEL.is_trained, FEATURE_STORE.size(), imp)
             send_alert("🤖 ML model retrained successfully.")
+        else:
+            update_ml_status(MODEL.is_trained, FEATURE_STORE.size(), {})
 
 
 async def paper_exit_check_loop() -> None:
@@ -143,6 +148,16 @@ async def paper_exit_check_loop() -> None:
                             send_alert("🔴 KILL SWITCH TRIGGERED — Halting all trading.")
                             _shutdown_event.set()
                             break
+
+                update_positions([
+                    {
+                        "id": p.id, "symbol": p.symbol,
+                        "entry": round(p.entry, 5), "size": round(p.size, 4),
+                        "tp": round(p.tp, 5), "sl": round(p.sl, 5),
+                        "age_seconds": int(p.age_seconds),
+                    }
+                    for p in PAPER_BROKER.positions
+                ])
         except Exception as exc:
             logger.debug(f"[main] Exit check error: {exc}")
 

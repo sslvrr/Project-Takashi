@@ -83,6 +83,18 @@ class TradingEngine:
 
             signal = decision_pipeline(df, ob, prev_ob, asset, self.model)
 
+            try:
+                from api.server import push_signal
+                push_signal({
+                    "asset": asset,
+                    "valid": signal is not None and signal.is_valid,
+                    "score": getattr(signal, "score", 0) if signal else 0,
+                    "price": round(getattr(signal, "price", 0.0) if signal else 0.0, 5),
+                    "direction": getattr(signal, "signal", None) if signal else None,
+                })
+            except Exception:
+                pass
+
             if signal and signal.is_valid:
                 await self.execution_queue.put(signal)
 
