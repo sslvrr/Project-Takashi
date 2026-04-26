@@ -149,6 +149,9 @@ async def paper_exit_check_loop() -> None:
                             _shutdown_event.set()
                             break
 
+                # Keep equity fresh even with no trades
+                update_state(equity=PAPER_BROKER.equity)
+
                 update_positions([
                     {
                         "id": p.id, "symbol": p.symbol,
@@ -196,6 +199,9 @@ async def startup() -> None:
             password=settings.MT5_PASSWORD,
             server=settings.MT5_SERVER,
         )
+
+    # Seed initial equity into API state
+    update_state(equity=PAPER_BROKER.equity)
 
     # Deployment gate check
     if settings.is_live:

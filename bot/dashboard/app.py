@@ -25,7 +25,8 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-API = "http://localhost:8000"
+# Inside Docker the API is reachable via service name; locally via localhost
+API = os.getenv("API_URL", "http://localhost:8000")
 
 
 # ─── API helpers ──────────────────────────────────────────────────────────────
@@ -79,13 +80,13 @@ def _demo_trades() -> pd.DataFrame:
     })
 
 
-def compute_metrics(df: pd.DataFrame) -> dict:
+def compute_metrics(df: pd.DataFrame, starting_equity: float = 10_000.0) -> dict:
     pnl = df["pnl"].dropna()
     if len(pnl) == 0:
         return {"total_pnl": 0, "trades": 0, "win_rate": 0, "max_drawdown": 0,
                 "profit_factor": 0, "sharpe": 0, "avg_win": 0, "avg_loss": 0,
-                "equity_series": [10_000], "drawdown_series": [0], "pnl_series": []}
-    equity = pnl.cumsum() + 10_000
+                "equity_series": [starting_equity], "drawdown_series": [0], "pnl_series": []}
+    equity = pnl.cumsum() + starting_equity
     peak = equity.cummax()
     dd = (peak - equity) / peak
     wins = pnl[pnl > 0]
@@ -133,9 +134,15 @@ start_time = status.get("start_time", "")
 if kill_triggered:
     st.error("🔴 KILL SWITCH TRIGGERED — Bot halted. Check logs.")
 elif bot_running:
-    st.success(f"🟢 Bot running | Mode: **{settings.MODE}** | Equity: **${live_equity:,.2f}** | Trades: **{trade_count}**")
+    st.success(f"🟢 Bot running | Mode: **{settings.MODE}** | Trades: **{trade_count}**")
 else:
-    st.warning("🟡 Bot is not running")
+    st.warning("🟡 Bot offline — dashboard showing cached data")
+
+# Equity always visible in its own row
+eq_col1, eq_col2, eq_col3 = st.columns(3)
+eq_col1.metric("Live Equity", f"${live_equity:,.2f}", delta=f"${live_equity - 10_000:+,.2f}" if live_equity else None)
+eq_col2.metric("Starting Capital", "$10,000.00")
+eq_col3.metric("Return", f"{((live_equity / 10_000) - 1) * 100:+.3f}%" if live_equity else "0.000%")
 
 if start_time:
     try:
@@ -225,10 +232,28 @@ with tab1:
 
     # Trade table
     st.subheader("Recent Trades")
-    cols = [c for c in ["symbol", "direction", "entry", "exit", "pnl", "score", "reason", "mode"]
-            if c in df.columns]
     if len(df) > 0:
-        st.dataframe(df[cols].tail(30).sort_index(ascending=False), use_container_width=True)
+        display_df = df.copy().tail(30).sort_index(ascending=False)
+
+        # Format time
+        if "opened_at" in display_df.columns:
+            display_df["time"] = pd.to_datetime(display_df["opened_at"], utc=True, errors="coerce") \
+                .dt.strftime("%m-%d %H:%M")
+
+        # Add running equity column
+        pnl_col = df["pnl"].dropna().cumsum() + 10_000
+        df2 = df.copy()
+        df2["equity"] = pnl_col
+        display_df = df2.tail(30).sort_index(ascending=False)
+        if "opened_at" in display_df.columns:
+            display_df["time"] = pd.to_datetime(display_df["opened_at"], utc=True, errors="coerce") \
+                .dt.strftime("%m-%d %H:%M")
+        display_df["equity"] = display_df["equity"].map(lambda v: f"${v:,.2f}" if pd.notna(v) else "—")
+        display_df["pnl"] = display_df["pnl"].map(lambda v: f"${v:+.4f}" if pd.notna(v) else "—")
+
+        cols = [c for c in ["time", "symbol", "direction", "entry", "exit", "pnl", "equity", "score", "reason"]
+                if c in display_df.columns]
+        st.dataframe(display_df[cols], use_container_width=True)
     else:
         st.info("No trades yet. Signals fire once 30 candles have buffered (~2.5 hrs).")
 

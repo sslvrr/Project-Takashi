@@ -16,6 +16,8 @@ services:
       - COINBASE_SECRET=${COINBASE_SECRET}
       - MODE=${MODE:-PAPER}
       - ACTIVE_ASSETS=${ACTIVE_ASSETS:-XRP}
+    ports:
+      - "8000:8000"
     depends_on:
       db:
         condition: service_healthy
@@ -35,26 +37,12 @@ services:
       - .env
     environment:
       - DB_URL=postgresql://trader:secret@db:5432/trading
+      - API_URL=http://kotegawa_bot:8000
     ports:
       - "8501:8501"
     depends_on:
       - db
-    networks:
-      - takashi_net
-
-  api:
-    build: .
-    container_name: takashi_api
-    command: uvicorn api.server:app --host 0.0.0.0 --port 8000
-    restart: always
-    env_file:
-      - .env
-    environment:
-      - DB_URL=postgresql://trader:secret@db:5432/trading
-    ports:
-      - "8000:8000"
-    depends_on:
-      - db
+      - bot
     networks:
       - takashi_net
 
