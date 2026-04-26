@@ -1,5 +1,5 @@
 """
-Multi-account execution — fan out signals to multiple Binance subaccounts.
+Multi-account execution — fan out signals to multiple Coinbase subaccounts.
 Accounts are loaded from environment (or overridden in tests).
 """
 
@@ -43,7 +43,7 @@ def execute_all(symbol: str, size: float, orderbook: Optional[dict] = None) -> l
     results = []
     for acc in _ACCOUNTS:
         try:
-            exchange = ccxt.binance({
+            exchange = ccxt.coinbase({
                 "apiKey": acc["api_key"],
                 "secret": acc["secret"],
                 "enableRateLimit": True,

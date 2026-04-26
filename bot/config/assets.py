@@ -11,9 +11,9 @@ ASSETS: dict[str, bool] = {
 }
 
 CRYPTO_SYMBOLS: dict[str, str] = {
-    "XRP": "XRP/USDT",
-    "BTC": "BTC/USDT",
-    "ETH": "ETH/USDT",
+    "XRP": "XRP/USD",
+    "BTC": "BTC/USD",
+    "ETH": "ETH/USD",
 }
 
 FX_SYMBOLS: dict[str, str] = {
@@ -39,4 +39,6 @@ def get_exchange_symbol(asset: str) -> str:
 
 
 def enabled_assets() -> list[str]:
-    return [a for a, on in ASSETS.items() if on]
+    from config.settings import settings
+    active = {a.strip().upper() for a in settings.ACTIVE_ASSETS.split(",")}
+    return [a for a, on in ASSETS.items() if on and a in active]

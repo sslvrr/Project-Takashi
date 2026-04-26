@@ -1,23 +1,21 @@
 """
-Multi-exchange price aggregation (Binance + Kraken).
+Multi-exchange price aggregation (Coinbase + Kraken).
 Used for cross-venue price discrepancy awareness and arbitrage detection.
 """
 
-import asyncio
 import ccxt
-import ccxt.async_support as ccxt_async
 from core.logger import logger
 
 
-_binance = None
+_coinbase = None
 _kraken = None
 
 
-def _get_binance():
-    global _binance
-    if _binance is None:
-        _binance = ccxt.binance({"enableRateLimit": True})
-    return _binance
+def _get_coinbase():
+    global _coinbase
+    if _coinbase is None:
+        _coinbase = ccxt.coinbase({"enableRateLimit": True})
+    return _coinbase
 
 
 def _get_kraken():
@@ -27,25 +25,23 @@ def _get_kraken():
     return _kraken
 
 
-def get_prices(symbol: str = "XRP/USDT") -> tuple[float, float]:
-    """Fetch last price from Binance and Kraken. Returns (binance_price, kraken_price)."""
+def get_prices(symbol: str = "XRP/USD") -> tuple[float, float]:
+    """Fetch last price from Coinbase and Kraken. Returns (coinbase_price, kraken_price)."""
     try:
-        b_ticker = _get_binance().fetch_ticker(symbol)
-        b_price = float(b_ticker["last"])
+        c_ticker = _get_coinbase().fetch_ticker(symbol)
+        c_price = float(c_ticker["last"])
     except Exception as exc:
-        logger.warning(f"[multi_exchange] Binance ticker error for {symbol}: {exc}")
-        b_price = 0.0
+        logger.warning(f"[multi_exchange] Coinbase ticker error for {symbol}: {exc}")
+        c_price = 0.0
 
     try:
-        # Kraken uses XRP/USDT or XXRPZUSD — map if needed
-        k_symbol = "XRP/USDT" if "XRP" in symbol else symbol
-        k_ticker = _get_kraken().fetch_ticker(k_symbol)
+        k_ticker = _get_kraken().fetch_ticker(symbol)
         k_price = float(k_ticker["last"])
     except Exception as exc:
         logger.warning(f"[multi_exchange] Kraken ticker error for {symbol}: {exc}")
         k_price = 0.0
 
-    return b_price, k_price
+    return c_price, k_price
 
 
 def arbitrage_opportunity(
@@ -57,12 +53,12 @@ def arbitrage_opportunity(
     return abs(p1 - p2) / p1 > threshold
 
 
-def check_arbitrage(symbol: str = "XRP/USDT") -> dict:
+def check_arbitrage(symbol: str = "XRP/USD") -> dict:
     p1, p2 = get_prices(symbol)
     spread_pct = abs(p1 - p2) / p1 * 100 if p1 > 0 else 0
     return {
         "symbol": symbol,
-        "binance": p1,
+        "coinbase": p1,
         "kraken": p2,
         "spread_pct": round(spread_pct, 4),
         "opportunity": arbitrage_opportunity(p1, p2),

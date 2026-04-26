@@ -15,9 +15,9 @@ class Settings(BaseSettings):
     # Active assets
     ACTIVE_ASSETS: str = Field(default="XRP,EURUSD")
 
-    # Binance
-    BINANCE_API_KEY: str = Field(default="")
-    BINANCE_SECRET: str = Field(default="")
+    # Coinbase Advanced Trade
+    COINBASE_API_KEY: str = Field(default="")
+    COINBASE_SECRET: str = Field(default="")
 
     # MetaTrader 5
     MT5_LOGIN: int = Field(default=0)

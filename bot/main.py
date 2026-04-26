@@ -7,7 +7,7 @@ Usage:
   MODE=LIVE python main.py    # Live mode (requires API keys)
 
 Architecture:
-  Async event loop → BinanceWS data → Strategy engine → Execution → DB
+  Async event loop → CoinbaseWS data → Strategy engine → Execution → DB
   MT5 polling runs on its own coroutine.
   Telegram alerts fire on trades, risk events, and kill switch.
 """
@@ -32,11 +32,11 @@ from db.session import init_db
 from db.feature_store import FeatureStore
 from db.models import Trade, SystemEvent
 
-from data.binance_ws import stream_orderbook, stream_klines, get_orderbook, get_ohlcv_buffer
+from data.coinbase_ws import stream_orderbook, stream_klines, get_orderbook, get_ohlcv_buffer
 from data.mt5_feed import connect as mt5_connect, get_rates as mt5_rates
 
 from execution.paper_exec import PaperBroker
-from execution.binance_exec import BinanceExecutor
+from execution.coinbase_exec import CoinbaseExecutor
 from execution.mt5_exec import MT5Executor
 
 from risk.kill_switch import KillSwitch
@@ -54,7 +54,7 @@ KILL_SWITCH = KillSwitch(max_drawdown=settings.MAX_DRAWDOWN)
 FEATURE_STORE = FeatureStore()
 MODEL = LGBMModel()
 
-_shutdown_event = asyncio.Event()
+_shutdown_event: asyncio.Event = None  # type: ignore[assignment]
 _trade_count = 0
 
 
@@ -73,7 +73,7 @@ async def xrp_orderbook_loop(engine: TradingEngine) -> None:
         engine.update_orderbook("XRP", data)
         await engine.strategy_queue.put("XRP")
 
-    await stream_orderbook("xrpusdt", callback=on_ob)
+    await stream_orderbook("XRP-USD", callback=on_ob)
 
 
 async def xrp_kline_loop(engine: TradingEngine) -> None:
@@ -84,7 +84,7 @@ async def xrp_kline_loop(engine: TradingEngine) -> None:
             df = pd.DataFrame(buf)
             engine.update_ohlcv("XRP", df)
 
-    await stream_klines("xrpusdt", interval="5m", callback=on_kline)
+    await stream_klines("XRP-USD", interval="5m", callback=on_kline)
 
 
 async def eurusd_polling_loop(engine: TradingEngine) -> None:
@@ -199,6 +199,8 @@ async def startup() -> None:
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
 async def run() -> None:
+    global _shutdown_event
+    _shutdown_event = asyncio.Event()
     await startup()
 
     engine = TradingEngine(
