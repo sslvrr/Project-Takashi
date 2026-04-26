@@ -49,7 +49,7 @@ import uvicorn
 
 # ─── Global state ─────────────────────────────────────────────────────────────
 
-PAPER_BROKER = PaperBroker(balance=10_000.0)
+PAPER_BROKER = PaperBroker(balance=1_000.0)
 KILL_SWITCH = KillSwitch(max_drawdown=settings.MAX_DRAWDOWN)
 FEATURE_STORE = FeatureStore()
 MODEL = LGBMModel()

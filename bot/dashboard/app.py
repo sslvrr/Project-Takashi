@@ -80,7 +80,7 @@ def _demo_trades() -> pd.DataFrame:
     })
 
 
-def compute_metrics(df: pd.DataFrame, starting_equity: float = 10_000.0) -> dict:
+def compute_metrics(df: pd.DataFrame, starting_equity: float = 1_000.0) -> dict:
     pnl = df["pnl"].dropna()
     if len(pnl) == 0:
         return {"total_pnl": 0, "trades": 0, "win_rate": 0, "max_drawdown": 0,
@@ -140,9 +140,9 @@ else:
 
 # Equity always visible in its own row
 eq_col1, eq_col2, eq_col3 = st.columns(3)
-eq_col1.metric("Live Equity", f"${live_equity:,.2f}", delta=f"${live_equity - 10_000:+,.2f}" if live_equity else None)
-eq_col2.metric("Starting Capital", "$10,000.00")
-eq_col3.metric("Return", f"{((live_equity / 10_000) - 1) * 100:+.3f}%" if live_equity else "0.000%")
+eq_col1.metric("Live Equity", f"${live_equity:,.2f}", delta=f"${live_equity - 1_000:+,.2f}" if live_equity else None)
+eq_col2.metric("Starting Capital", "$1,000.00")
+eq_col3.metric("Return", f"{((live_equity / 1_000) - 1) * 100:+.3f}%" if live_equity else "0.000%")
 
 if start_time:
     try:
@@ -241,7 +241,7 @@ with tab1:
                 .dt.strftime("%m-%d %H:%M")
 
         # Add running equity column
-        pnl_col = df["pnl"].dropna().cumsum() + 10_000
+        pnl_col = df["pnl"].dropna().cumsum() + 1_000
         df2 = df.copy()
         df2["equity"] = pnl_col
         display_df = df2.tail(30).sort_index(ascending=False)
