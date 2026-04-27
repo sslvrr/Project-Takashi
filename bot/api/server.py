@@ -47,6 +47,7 @@ _ml_state: dict = {
 }
 
 _signal_feed: deque = deque(maxlen=100)
+_close_requests: set = set()
 
 
 # ─── State updaters (called from main.py / engine) ────────────────────────────
@@ -67,6 +68,13 @@ def update_ml_status(trained: bool, samples: int, top_features: dict) -> None:
         "top_features": top_features,
         "last_retrain": datetime.now(timezone.utc).isoformat() if trained else _ml_state.get("last_retrain"),
     })
+
+
+def pop_close_requests() -> set:
+    """Return and clear all pending manual close requests."""
+    reqs = set(_close_requests)
+    _close_requests.clear()
+    return reqs
 
 
 def push_signal(signal_info: dict) -> None:
@@ -174,6 +182,14 @@ def latency():
 def get_positions():
     """Open paper positions from the live broker."""
     return {"positions": _positions_state}
+
+
+@app.post("/positions/{position_id}/close")
+def close_position(position_id: str):
+    """Request a manual market close for a paper position."""
+    _close_requests.add(position_id)
+    logger.info(f"[api] Manual close requested for position {position_id}")
+    return {"status": "close_requested", "id": position_id}
 
 
 @app.get("/ml/status")

@@ -291,17 +291,24 @@ with tab2:
             age_s   = p.get("age_seconds", 0)
             age_str = f"{age_s // 60}m {age_s % 60}s"
             upnl_pct = ((current - entry) / entry * 100) if entry else 0
+            pos_id  = p.get("id", "")
 
             pnl_color = "🟢" if upnl >= 0 else "🔴"
 
             with st.container(border=True):
-                c1, c2, c3, c4, c5 = st.columns(5)
-                c1.metric("Symbol",   p.get("symbol", ""))
-                c2.metric("Entry",    f"${entry:.5f}")
-                c3.metric("Current",  f"${current:.5f}",
-                          delta=f"{upnl_pct:+.3f}%")
+                c1, c2, c3, c4, c5, c6 = st.columns([2, 2, 2, 2, 2, 1])
+                c1.metric("Symbol",      p.get("symbol", ""))
+                c2.metric("Entry",       f"${entry:.5f}")
+                c3.metric("Current",     f"${current:.5f}", delta=f"{upnl_pct:+.3f}%")
                 c4.metric("Unreal. PnL", f"{pnl_color} ${upnl:+.4f}")
-                c5.metric("Age",      age_str)
+                c5.metric("Age",         age_str)
+                if c6.button("✕", key=f"close_{pos_id}", help="Close at market price"):
+                    ok = _post(f"/positions/{pos_id}/close")
+                    if ok:
+                        st.warning(f"Close requested for {pos_id} — executes within 5s")
+                        st.rerun()
+                    else:
+                        st.error("Close failed")
 
                 # Visual: where is current price between SL and TP?
                 if tp > sl and sl > 0:

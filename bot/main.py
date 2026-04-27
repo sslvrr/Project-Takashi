@@ -43,7 +43,7 @@ from risk.kill_switch import KillSwitch
 from strategy.model_lgbm import LGBMModel
 from strategy.training_pipeline import run_training
 
-from api.server import app as fastapi_app, update_state, update_positions, update_ml_status
+from api.server import app as fastapi_app, update_state, update_positions, update_ml_status, pop_close_requests
 import uvicorn
 
 
@@ -147,6 +147,17 @@ async def paper_exit_check_loop() -> None:
                         if KILL_SWITCH.update(PAPER_BROKER.equity):
                             send_alert("🔴 KILL SWITCH TRIGGERED — Halting all trading.")
                             _shutdown_event.set()
+                            break
+
+                # Manual close requests from dashboard
+                for req_id in pop_close_requests():
+                    for pos in list(PAPER_BROKER.positions):
+                        if pos.id == req_id:
+                            pnl = PAPER_BROKER.close(pos, price, reason="manual")
+                            record_trade(pnl)
+                            global _trade_count
+                            _trade_count += 1
+                            send_alert(f"🔒 MANUAL CLOSE {pos.symbol} @ ${price:.5f} | PnL ${pnl:+.4f}")
                             break
 
                 # Keep equity fresh even with no trades
