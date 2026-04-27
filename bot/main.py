@@ -152,12 +152,15 @@ async def paper_exit_check_loop() -> None:
                 # Keep equity fresh even with no trades
                 update_state(equity=PAPER_BROKER.equity)
 
+                current_price = price if bids else 0.0
                 update_positions([
                     {
                         "id": p.id, "symbol": p.symbol,
                         "entry": round(p.entry, 5), "size": round(p.size, 4),
                         "tp": round(p.tp, 5), "sl": round(p.sl, 5),
                         "age_seconds": int(p.age_seconds),
+                        "current_price": round(current_price, 5),
+                        "unrealized_pnl": round((current_price - p.entry) * p.size, 4),
                     }
                     for p in PAPER_BROKER.positions
                 ])

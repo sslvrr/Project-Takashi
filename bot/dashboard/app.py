@@ -279,16 +279,44 @@ with tab2:
     positions = pos_data.get("positions", [])
 
     if positions:
-        pos_df = pd.DataFrame(positions)
-        pos_df["age"]        = pos_df["age_seconds"].apply(lambda s: f"{s//60}m {s%60}s")
-        pos_df["dist_to_tp"] = ((pos_df["tp"] - pos_df["entry"]) / pos_df["entry"] * 100).round(3)
-        pos_df["dist_to_sl"] = ((pos_df["entry"] - pos_df["sl"]) / pos_df["entry"] * 100).round(3)
-        disp = pos_df[["id", "symbol", "entry", "size", "tp", "sl", "dist_to_tp", "dist_to_sl", "age"]]
-        disp.columns = ["ID", "Symbol", "Entry", "Size", "TP", "SL", "TP %", "SL %", "Age"]
-        st.dataframe(disp, use_container_width=True)
-        st.caption(f"{len(positions)} open position(s)")
+        st.caption(f"{len(positions)} open position(s) — refreshes every 30s")
+
+        for p in positions:
+            entry   = p.get("entry", 0)
+            current = p.get("current_price", 0)
+            tp      = p.get("tp", 0)
+            sl      = p.get("sl", 0)
+            size    = p.get("size", 0)
+            upnl    = p.get("unrealized_pnl", 0)
+            age_s   = p.get("age_seconds", 0)
+            age_str = f"{age_s // 60}m {age_s % 60}s"
+            upnl_pct = ((current - entry) / entry * 100) if entry else 0
+
+            pnl_color = "🟢" if upnl >= 0 else "🔴"
+
+            with st.container(border=True):
+                c1, c2, c3, c4, c5 = st.columns(5)
+                c1.metric("Symbol",   p.get("symbol", ""))
+                c2.metric("Entry",    f"${entry:.5f}")
+                c3.metric("Current",  f"${current:.5f}",
+                          delta=f"{upnl_pct:+.3f}%")
+                c4.metric("Unreal. PnL", f"{pnl_color} ${upnl:+.4f}")
+                c5.metric("Age",      age_str)
+
+                # Visual: where is current price between SL and TP?
+                if tp > sl and sl > 0:
+                    price_range = tp - sl
+                    pos_in_range = max(0.0, min(1.0, (current - sl) / price_range))
+                    st.progress(pos_in_range,
+                                text=f"SL ${sl:.5f}  ←  current ${current:.5f}  →  TP ${tp:.5f}")
+
+                col_info1, col_info2, col_info3 = st.columns(3)
+                col_info1.caption(f"Size: {size}")
+                col_info2.caption(f"TP dist: +{((tp - entry)/entry*100):.2f}%")
+                col_info3.caption(f"SL dist: -{((entry - sl)/entry*100):.2f}%")
     else:
         st.info("No open positions right now.")
+        st.caption("Positions appear here the moment the bot enters a paper trade. Each card updates every 30s with live price and unrealized P&L.")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
