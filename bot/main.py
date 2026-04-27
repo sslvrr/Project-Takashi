@@ -129,6 +129,7 @@ async def model_retrain_loop() -> None:
 
 async def paper_exit_check_loop() -> None:
     """Every 5s sweep paper positions for TP/SL exits."""
+    global _trade_count
     while not _shutdown_event.is_set():
         await asyncio.sleep(5)
         try:
@@ -140,7 +141,6 @@ async def paper_exit_check_loop() -> None:
                     pnls = PAPER_BROKER.check_exits({"XRP": price})
                     for pnl in pnls:
                         record_trade(pnl)
-                        global _trade_count
                         _trade_count += 1
                         update_state(trade_count=_trade_count, equity=PAPER_BROKER.equity)
 
@@ -155,7 +155,6 @@ async def paper_exit_check_loop() -> None:
                         if pos.id == req_id:
                             pnl = PAPER_BROKER.close(pos, price, reason="manual")
                             record_trade(pnl)
-                            global _trade_count
                             _trade_count += 1
                             send_alert(f"🔒 MANUAL CLOSE {pos.symbol} @ ${price:.5f} | PnL ${pnl:+.4f}")
                             break
