@@ -319,14 +319,32 @@ with tab1:
         tj["Exit"]  = tj["exit"].apply(lambda v: f"{v:.5f}" if pd.notna(v) else "—")
 
         # ── Filters ───────────────────────────────────────────────────────────
+        # Row 1: Asset / symbol
+        symbols = sorted(tj["symbol"].dropna().unique().tolist()) if "symbol" in tj.columns else []
+        symbol_opts = ["All"] + symbols
+        f1, f2 = st.columns([3, 7])
+        with f1:
+            selected_symbol = st.radio(
+                "Asset", symbol_opts, horizontal=True,
+                key="symbol_filter"
+            )
+
+        # Row 2: Strategy / result
         strategies = sorted([s for s in tj["Strategy"].unique() if s not in ("—",)])
         filter_opts = ["All"] + strategies + ["Wins", "Losses"]
-        selected = st.radio(
-            "Filter", filter_opts, horizontal=True, label_visibility="collapsed",
-            key="trade_filter"
-        )
+        with f2:
+            selected = st.radio(
+                "Filter", filter_opts, horizontal=True,
+                key="trade_filter"
+            )
 
         view = tj.copy()
+
+        # Apply asset filter first
+        if selected_symbol != "All":
+            view = view[view["symbol"] == selected_symbol]
+
+        # Apply strategy / result filter
         if selected == "Wins":
             view = view[view["Result"] == "WIN"]
         elif selected == "Losses":
@@ -336,7 +354,11 @@ with tab1:
 
         view = view.sort_index(ascending=False)
 
-        display_cols = ["#", "Time (EST)", "Strategy", "Dir", "Entry", "Exit",
+        display_cols = ["#", "Time (EST)", "symbol", "Strategy", "Dir", "Entry", "Exit",
+                        "Pips", "R", "P&L", "Score", "Result", "Reason"]
+        # Rename symbol for display
+        view = view.rename(columns={"symbol": "Asset"})
+        display_cols = ["#", "Time (EST)", "Asset", "Strategy", "Dir", "Entry", "Exit",
                         "Pips", "R", "P&L", "Score", "Result", "Reason"]
 
         # Row colour: green tint for WIN, red tint for LOSS
@@ -354,10 +376,11 @@ with tab1:
         w = len(view[view["Result"] == "WIN"])
         l = len(view[view["Result"] == "LOSS"])
         wr = w / len(view) * 100 if len(view) > 0 else 0.0
-        total = tj["pnl"].sum()
+        view_pnl = view["pnl"].sum()
+        total_all = tj["pnl"].sum()
         st.caption(
             f"Showing {len(view)} trades | {w}W {l}L | WR {wr:.1f}% | "
-            f"Total P&L ${total:+.2f}"
+            f"Filtered P&L ${view_pnl:+.2f} | All-time P&L ${total_all:+.2f}"
         )
 
     with st.sidebar:
