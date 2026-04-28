@@ -19,10 +19,15 @@ class Settings(BaseSettings):
     COINBASE_API_KEY: str = Field(default="")
     COINBASE_SECRET: str = Field(default="")
 
-    # MetaTrader 5
+    # MetaTrader 5 (Windows-only; replaced by OANDA feed on macOS/Linux)
     MT5_LOGIN: int = Field(default=0)
     MT5_PASSWORD: str = Field(default="")
     MT5_SERVER: str = Field(default="")
+
+    # OANDA v20 REST feed (FX data on any platform)
+    OANDA_API_KEY: str = Field(default="")
+    OANDA_ACCOUNT_ID: str = Field(default="")
+    OANDA_ENVIRONMENT: str = Field(default="practice")  # practice | live
 
     # Database
     DB_URL: str = Field(

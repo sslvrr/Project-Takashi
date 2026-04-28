@@ -88,17 +88,23 @@ async def xrp_kline_loop(engine: TradingEngine) -> None:
 
 
 async def eurusd_polling_loop(engine: TradingEngine) -> None:
-    """Poll EURUSD M5 bars from MT5 every 30 seconds."""
+    """Poll EURUSD M5 bars from OANDA every 30 seconds."""
     if not is_fx("EURUSD"):
         return
+    from data.oanda_feed import get_candles, is_configured
+    if not is_configured():
+        logger.warning("[main] OANDA_API_KEY not set — EURUSD feed disabled. "
+                       "Add OANDA_API_KEY to .env to enable EURUSD paper trading.")
+        return
+    logger.info("[main] EURUSD feed starting via OANDA REST API.")
     while not _shutdown_event.is_set():
         try:
-            df = mt5_rates("EURUSD", "M5", 200)
+            df = get_candles("EURUSD", granularity="M5", count=200)
             if not df.empty:
                 engine.update_ohlcv("EURUSD", df)
                 await engine.strategy_queue.put("EURUSD")
         except Exception as exc:
-            logger.warning(f"[main] EURUSD poll error: {exc}")
+            logger.warning(f"[main] EURUSD OANDA poll error: {exc}")
         await asyncio.sleep(30)
 
 
