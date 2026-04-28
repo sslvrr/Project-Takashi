@@ -956,26 +956,42 @@ with tab8:
         with st.expander(f"**{name}** — {s.get('timeframe','?')} | {s.get('assets','?')}"):
             c1, c2, c3 = st.columns([2, 2, 3])
 
-            # Toggle
-            enabled = c1.toggle(
-                "Enabled", value=s.get("enabled", False),
-                key=f"strat_toggle_{name}"
-            )
-            if enabled != s.get("enabled", False):
+            api_enabled = s.get("enabled", False)
+            api_status  = status
+
+            # Sync session state to API value whenever the API value changes
+            # (prevents stale session state from sending spurious toggle POSTs on auto-refresh)
+            toggle_key   = f"strat_toggle_{name}"
+            toggle_track = f"strat_toggle_api_{name}"
+            if st.session_state.get(toggle_track) != api_enabled:
+                st.session_state[toggle_key]   = api_enabled
+                st.session_state[toggle_track] = api_enabled
+
+            status_key   = f"strat_status_{name}"
+            status_track = f"strat_status_api_{name}"
+            if st.session_state.get(status_track) != api_status:
+                st.session_state[status_key]   = api_status
+                st.session_state[status_track] = api_status
+
+            # Toggle — only fires POST when user actually clicks
+            enabled = c1.toggle("Enabled", key=toggle_key)
+            if enabled != api_enabled:
                 requests.post(f"{API}/strategies/{name}/toggle",
                               json={"enabled": enabled}, timeout=3)
+                st.session_state[toggle_track] = enabled
                 st.rerun()
 
-            # Status selector
+            # Status selector — only fires POST when user actually changes it
             status_opts = ["PAPER", "DEVELOPMENT", "PAUSED", "DISCARD"]
             new_status = c2.selectbox(
                 "Status", status_opts,
-                index=status_opts.index(status) if status in status_opts else 1,
-                key=f"strat_status_{name}"
+                index=status_opts.index(api_status) if api_status in status_opts else 1,
+                key=status_key,
             )
-            if new_status != status:
+            if new_status != api_status:
                 requests.post(f"{API}/strategies/{name}/status",
                               json={"status": new_status}, timeout=3)
+                st.session_state[status_track] = new_status
                 st.rerun()
 
             c3.caption(s.get("description") or "")

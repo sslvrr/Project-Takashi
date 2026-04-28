@@ -352,19 +352,25 @@ async def run() -> None:
         ))
 
     # VENOM multi-TF loops (one per asset × TF config)
+    from db.session import is_available as _db_ok
     from db.strategy_store import get_all_strategies as _get_strats
-    venom_cfg = next((s for s in _get_strats() if s["name"] == "VENOM" and s.get("enabled")), None)
+    _all_strats = _get_strats()
+    logger.info(f"[main] Strategy registry read (db_ok={_db_ok()}): "
+                + ", ".join(f"{s['name']} enabled={s['enabled']}" for s in _all_strats))
+    venom_cfg = next((s for s in _all_strats if s["name"] == "VENOM" and s.get("enabled")), None)
     if venom_cfg:
         venom_assets = [a.strip() for a in (venom_cfg.get("assets") or "").split(",") if a.strip()]
         active = set(enabled_assets())
-        for v_asset in [a for a in venom_assets if a in active]:
+        runnable = [a for a in venom_assets if a in active]
+        logger.info(f"[main] VENOM enabled — spawning {len(runnable) * 3} loops: {runnable} × 3 TFs")
+        for v_asset in runnable:
             for ltf_g, htf_g, ltf_l, htf_l, poll_s in _VENOM_TF_CONFIGS:
                 tasks.append(asyncio.create_task(
                     venom_polling_loop(v_asset, ltf_g, htf_g, ltf_l, poll_s),
                     name=f"venom_{v_asset.lower()}_{ltf_l.lower()}"
                 ))
-        if venom_assets:
-            logger.info(f"[main] VENOM loops started: {venom_assets} × 3 TFs")
+    else:
+        logger.info("[main] VENOM disabled — no loops spawned (enable in Strategies tab)")
 
     # Engine
     tasks.append(asyncio.create_task(engine.run(), name="engine"))
