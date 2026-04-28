@@ -181,9 +181,9 @@ st.divider()
 
 # ─── Tabs ─────────────────────────────────────────────────────────────────────
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "📊 Overview", "📋 Positions", "⚡ Signals",
-    "🤖 ML", "⚠️ Risk & Health", "🎯 Go-Live", "👥 Investor",
+    "🤖 ML", "⚠️ Risk & Health", "🎯 Go-Live", "👥 Investor", "🧬 Strategies",
 ])
 
 
@@ -787,6 +787,213 @@ with tab7:
     if fund_data:
         fd_df = pd.DataFrame(fund_data.items(), columns=["Metric", "Value"])
         st.dataframe(fd_df, use_container_width=True, hide_index=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 8 — STRATEGIES
+# ══════════════════════════════════════════════════════════════════════════════
+
+_STATUS_COLOR = {
+    "PAPER":       "#1e90ff",
+    "DEVELOPMENT": "#ffa500",
+    "PAUSED":      "#888888",
+    "DISCARD":     "#ff4444",
+}
+_PIPELINE_COLOR = {
+    "ACTIVE":        "#00cc96",
+    "BASELINE":      "#888888",
+    "PROMOTE":       "#00cc96",
+    "ALT_PROMOTE":   "#ffa500",
+    "KEEP_IMPROVING":"#1e90ff",
+    "FLAGGED_PF":    "#ff9900",
+}
+
+_VENOM_REFERENCE = """
+## VENOM — ICT Multi-Timeframe Sweep + FVG Strategy
+
+Both bull and bear setups run as independent 8-state machines simultaneously.
+
+### Sequence (Bullish)
+```
+HTF wick below SSL
+  → State 1: track bearish FVG forming on sell-off
+  → LTF wick below recent swing low (secondary sweep)
+  → State 2→3: bearish FVG confirmed
+  → State 3→4: close above bearish FVG top (reclaim = bullish order flow)
+  → State 4→5: bullish FVG forms on recovery leg
+  → State 5→7: CHOC confirmed (close > b_choc)
+  → State 7: retrace into bullish FVG zone → ENTRY
+```
+
+### State Machine
+
+| State | Name | CHOC Condition |
+|---|---|---|
+| 0 | Idle | htf_bull → State 1 |
+| 1 | HTF Swept | track bear FVG; ltf sweep → State 2 |
+| 2 | LTF Swept | b_bft exists → State 3 immediately |
+| 3 | Bear FVG Found | close > b_bft → State 4 |
+| 4 | Bear FVG Reclaimed | bull FVG forms → State 5 |
+| 5 | Bull FVG Found | close > b_choc → **State 7 (CHOC)** |
+| 7 | **CHOC Confirmed** | FVG touch → ENTRY; close < b_choc → State 0 |
+| 8 | In Trade | position closed → State 0 |
+
+### Entry & Risk
+| Parameter | Value |
+|---|---|
+| Stop Loss | 10 ticks below LTF sweep wick |
+| Take Profit | Entry + (R:R × risk) |
+| Default R:R | 2.0 |
+| Position Size | 2% equity |
+
+### Timeframes
+| LTF Chart | HTF Input | Use Case |
+|---|---|---|
+| 1H | Daily (D) | Default — swing |
+| 15M | 4H | Intraday |
+| 5M | 1H | Scalp |
+
+### Backtest (1Y, 1H/D, XAUUSD)
+- **7 trades | 71.43% WR | +$137.72 (+1.37%) | Max DD 0.06%**
+"""
+
+with tab8:
+    h1, h2 = st.columns([5, 2])
+    h1.subheader("Strategy Performance")
+    h2.caption(f"Updated {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}")
+
+    strats_raw = _get("/strategies", {}).get("strategies", [])
+
+    # Load trade data for live metrics (reuse df_all from tab1 scope)
+    try:
+        _tf_all = load_trades()
+    except Exception:
+        _tf_all = pd.DataFrame()
+
+    # ── Build HTML performance table ──────────────────────────────────────────
+    def _live_metrics(name: str) -> dict:
+        if _tf_all.empty or "strategy" not in _tf_all.columns:
+            return {"trades": 0, "wr": None, "pnl": None, "rr": None, "exp": None}
+        sub = _tf_all[_tf_all["strategy"] == name]
+        n = len(sub)
+        if n == 0:
+            return {"trades": 0, "wr": None, "pnl": None, "rr": None, "exp": None}
+        wins   = sub[sub["pnl"] > 0]["pnl"]
+        losses = sub[sub["pnl"] < 0]["pnl"]
+        wr     = len(wins) / n
+        pnl    = sub["pnl"].sum()
+        avg_rr = float((wins.mean() / abs(losses.mean()))) if len(wins) > 0 and len(losses) > 0 else None
+        exp    = float(sub["pnl"].mean())
+        return {"trades": n, "wr": wr, "pnl": pnl, "rr": avg_rr, "exp": exp}
+
+    rows_html = ""
+    for s in strats_raw:
+        name     = s["name"]
+        ver      = s.get("version") or ""
+        tf       = s.get("timeframe") or "—"
+        assets_s = s.get("assets") or "—"
+        status   = s.get("status", "DEVELOPMENT")
+        pipeline = s.get("pipeline") or "—"
+        bt_wr    = s.get("bt_win_rate")
+        bt_pf    = s.get("bt_profit_factor")
+        bt_pnl   = s.get("bt_net_pnl")
+        bt_n     = s.get("bt_trades")
+        lm       = _live_metrics(name)
+
+        sc  = _STATUS_COLOR.get(status, "#888")
+        pc  = _PIPELINE_COLOR.get(pipeline.split()[0] if pipeline else "", "#888")
+
+        live_wr  = f"{lm['wr']:.0%}"          if lm["wr"]  is not None else "—"
+        live_rr  = f"{lm['rr']:.2f}"          if lm["rr"]  is not None else "—"
+        live_pnl = f"${lm['pnl']:+.2f}"       if lm["pnl"] is not None else "—"
+        live_exp = f"${lm['exp']:+.2f}"        if lm["exp"] is not None else "—"
+
+        bt_wr_s  = f"bt:{bt_wr*100:.0f}%"     if bt_wr  is not None else ""
+        bt_pf_s  = f"PF {bt_pf:.2f}"          if bt_pf  is not None else ""
+        bt_pnl_s = f"bt:${bt_pnl:+.2f}"       if bt_pnl is not None else ""
+        bt_n_s   = f"{bt_n}t"                  if bt_n   is not None else ""
+
+        pnl_color = "#00cc96" if lm["pnl"] is not None and lm["pnl"] >= 0 else "#ef553b"
+
+        rows_html += f"""
+        <tr>
+          <td><b>{name}</b><br><small style="color:#888">{ver}</small></td>
+          <td>{tf}<br><small style="color:#888">{assets_s}</small></td>
+          <td style="text-align:center"><b>{lm['trades']}</b><br><small style="color:#888">{bt_n_s}</small></td>
+          <td style="text-align:center"><b>{live_wr}</b><br><small style="color:#888">{bt_wr_s}</small></td>
+          <td style="text-align:center">{live_rr}<br><small style="color:#888">{bt_pf_s}</small></td>
+          <td style="text-align:center">{live_exp}<br><small style="color:#888">&nbsp;</small></td>
+          <td style="text-align:center;color:{pnl_color}"><b>{live_pnl}</b><br><small style="color:#888">{bt_pnl_s}</small></td>
+          <td style="text-align:center"><span style="color:{sc};font-weight:700">{status}</span></td>
+          <td><span style="color:{pc};font-size:0.8em">{pipeline}</span></td>
+        </tr>"""
+
+    table_html = f"""
+    <style>
+      .strat-table {{ width:100%; border-collapse:collapse; font-family:monospace; font-size:0.85em; }}
+      .strat-table th {{ background:#111; color:#666; padding:8px 10px; text-align:left;
+                         border-bottom:1px solid #333; letter-spacing:0.08em; font-size:0.75em; }}
+      .strat-table td {{ padding:8px 10px; border-bottom:1px solid #1e1e1e; vertical-align:top; color:#ddd; }}
+      .strat-table tr:hover td {{ background:#1a1a1a; }}
+    </style>
+    <table class="strat-table">
+      <thead><tr>
+        <th>STRATEGY</th><th>TIMEFRAME</th><th>TRADES</th><th>WIN RATE</th>
+        <th>AVG R:R</th><th>EXPECTANCY</th><th>GROSS P&L</th><th>STATUS</th><th>PIPELINE</th>
+      </tr></thead>
+      <tbody>{rows_html}</tbody>
+    </table>"""
+
+    st.markdown(table_html, unsafe_allow_html=True)
+    st.divider()
+
+    # ── Per-strategy controls ─────────────────────────────────────────────────
+    for s in strats_raw:
+        name   = s["name"]
+        status = s.get("status", "DEVELOPMENT")
+        sc     = _STATUS_COLOR.get(status, "#888")
+
+        with st.expander(f"**{name}** — {s.get('timeframe','?')} | {s.get('assets','?')}"):
+            c1, c2, c3 = st.columns([2, 2, 3])
+
+            # Toggle
+            enabled = c1.toggle(
+                "Enabled", value=s.get("enabled", False),
+                key=f"strat_toggle_{name}"
+            )
+            if enabled != s.get("enabled", False):
+                requests.post(f"{API}/strategies/{name}/toggle",
+                              json={"enabled": enabled}, timeout=3)
+                st.rerun()
+
+            # Status selector
+            status_opts = ["PAPER", "DEVELOPMENT", "PAUSED", "DISCARD"]
+            new_status = c2.selectbox(
+                "Status", status_opts,
+                index=status_opts.index(status) if status in status_opts else 1,
+                key=f"strat_status_{name}"
+            )
+            if new_status != status:
+                requests.post(f"{API}/strategies/{name}/status",
+                              json={"status": new_status}, timeout=3)
+                st.rerun()
+
+            c3.caption(s.get("description") or "")
+
+            # Backtest summary
+            bt_row = []
+            if s.get("bt_trades"):     bt_row.append(f"{s['bt_trades']} trades")
+            if s.get("bt_win_rate"):   bt_row.append(f"{s['bt_win_rate']*100:.1f}% WR")
+            if s.get("bt_profit_factor"): bt_row.append(f"PF {s['bt_profit_factor']:.2f}")
+            if s.get("bt_net_pnl"):    bt_row.append(f"${s['bt_net_pnl']:+.2f} net P&L")
+            if s.get("bt_max_dd"):     bt_row.append(f"${s['bt_max_dd']:.2f} max DD")
+            if bt_row:
+                st.caption("**Backtest:** " + " | ".join(bt_row))
+
+            # VENOM full reference
+            if name == "VENOM":
+                with st.expander("Full Strategy Reference"):
+                    st.markdown(_VENOM_REFERENCE)
 
 
 # ─── Auto-refresh ─────────────────────────────────────────────────────────────

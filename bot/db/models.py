@@ -57,6 +57,28 @@ class Investor(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
+class StrategyConfig(Base):
+    """Registry of all strategies — live and in development."""
+    __tablename__ = "strategy_configs"
+
+    id          = Column(Integer, primary_key=True, autoincrement=True)
+    name        = Column(String(50), unique=True, nullable=False)
+    version     = Column(String(20), nullable=True)
+    timeframe   = Column(String(30), nullable=True)
+    assets      = Column(String(100), nullable=True)
+    description = Column(Text, nullable=True)
+    status      = Column(String(20), nullable=False, default="DEVELOPMENT")
+    pipeline    = Column(String(100), nullable=True)
+    enabled     = Column(Boolean, nullable=False, default=False)
+    bt_win_rate      = Column(Float, nullable=True)
+    bt_profit_factor = Column(Float, nullable=True)
+    bt_net_pnl       = Column(Float, nullable=True)
+    bt_max_dd        = Column(Float, nullable=True)
+    bt_trades        = Column(Integer, nullable=True)
+    created_at  = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at  = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
 class SystemEvent(Base):
     """Audit log for kill switch triggers, mode changes, alerts."""
     __tablename__ = "system_events"

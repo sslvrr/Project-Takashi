@@ -278,6 +278,38 @@ def arbitrage():
         return {"error": str(exc), "coinbase": 0, "kraken": 0, "spread_pct": 0, "opportunity": False}
 
 
+@app.get("/strategies")
+def list_strategies():
+    from db.strategy_store import get_all_strategies
+    return {"strategies": get_all_strategies()}
+
+
+class StrategyToggleBody(BaseModel):
+    enabled: bool
+
+
+@app.post("/strategies/{name}/toggle")
+def toggle_strategy_endpoint(name: str, body: StrategyToggleBody):
+    from db.strategy_store import toggle_strategy
+    ok = toggle_strategy(name.upper(), body.enabled)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"Strategy {name} not found")
+    return {"strategy": name.upper(), "enabled": body.enabled}
+
+
+class StrategyStatusBody(BaseModel):
+    status: str
+
+
+@app.post("/strategies/{name}/status")
+def update_strategy_status(name: str, body: StrategyStatusBody):
+    from db.strategy_store import set_status
+    ok = set_status(name.upper(), body.status.upper())
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"Strategy {name} not found")
+    return {"strategy": name.upper(), "status": body.status.upper()}
+
+
 @app.get("/monthly/report")
 def get_monthly_report():
     """Generate monthly performance report."""

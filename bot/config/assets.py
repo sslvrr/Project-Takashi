@@ -4,10 +4,11 @@ Toggle at runtime by editing ASSETS or via the /assets API endpoint.
 """
 
 ASSETS: dict[str, bool] = {
-    "XRP": True,
+    "XRP":    True,
     "EURUSD": True,
-    "BTC": False,
-    "ETH": False,
+    "XAUUSD": True,   # Gold/USD — via OANDA
+    "BTC":    False,
+    "ETH":    False,
 }
 
 CRYPTO_SYMBOLS: dict[str, str] = {
@@ -18,6 +19,7 @@ CRYPTO_SYMBOLS: dict[str, str] = {
 
 FX_SYMBOLS: dict[str, str] = {
     "EURUSD": "EURUSD",
+    "XAUUSD": "XAUUSD",  # Spot gold — OANDA maps to XAU_USD
 }
 
 CRYPTO_ASSETS = set(CRYPTO_SYMBOLS.keys())

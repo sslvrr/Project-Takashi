@@ -87,24 +87,22 @@ async def xrp_kline_loop(engine: TradingEngine) -> None:
     await stream_klines("XRP-USD", interval="5m", callback=on_kline)
 
 
-async def eurusd_polling_loop(engine: TradingEngine) -> None:
-    """Poll EURUSD M5 bars from OANDA every 30 seconds."""
-    if not is_fx("EURUSD"):
-        return
+async def fx_polling_loop(engine: TradingEngine, asset: str) -> None:
+    """Poll any FX/commodity asset from OANDA every 30 seconds."""
     from data.oanda_feed import get_candles, is_configured
     if not is_configured():
-        logger.warning("[main] OANDA_API_KEY not set — EURUSD feed disabled. "
-                       "Add OANDA_API_KEY to .env to enable EURUSD paper trading.")
+        logger.warning(f"[main] OANDA_API_KEY not set — {asset} feed disabled. "
+                       "Add OANDA_API_KEY to .env to activate.")
         return
-    logger.info("[main] EURUSD feed starting via OANDA REST API.")
+    logger.info(f"[main] {asset} feed starting via OANDA REST API.")
     while not _shutdown_event.is_set():
         try:
-            df = get_candles("EURUSD", granularity="M5", count=200)
+            df = get_candles(asset, granularity="M5", count=200)
             if not df.empty:
-                engine.update_ohlcv("EURUSD", df)
-                await engine.strategy_queue.put("EURUSD")
+                engine.update_ohlcv(asset, df)
+                await engine.strategy_queue.put(asset)
         except Exception as exc:
-            logger.warning(f"[main] EURUSD OANDA poll error: {exc}")
+            logger.warning(f"[main] {asset} OANDA poll error: {exc}")
         await asyncio.sleep(30)
 
 
@@ -206,6 +204,8 @@ async def startup() -> None:
 
     # Database
     init_db()
+    from db.strategy_store import seed_default_strategies
+    seed_default_strategies()
     FEATURE_STORE.load_from_db(limit=2000)
 
     # Try loading a saved model
@@ -261,8 +261,10 @@ async def run() -> None:
         tasks.append(asyncio.create_task(xrp_orderbook_loop(engine), name="xrp_ob"))
         tasks.append(asyncio.create_task(xrp_kline_loop(engine), name="xrp_klines"))
 
-    if "EURUSD" in enabled_assets():
-        tasks.append(asyncio.create_task(eurusd_polling_loop(engine), name="eurusd"))
+    for fx_asset in [a for a in enabled_assets() if is_fx(a)]:
+        tasks.append(asyncio.create_task(
+            fx_polling_loop(engine, fx_asset), name=f"oanda_{fx_asset.lower()}"
+        ))
 
     # Engine
     tasks.append(asyncio.create_task(engine.run(), name="engine"))
