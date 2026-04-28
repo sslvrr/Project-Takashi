@@ -88,13 +88,12 @@ async def xrp_kline_loop(engine: TradingEngine) -> None:
 
 
 async def fx_polling_loop(engine: TradingEngine, asset: str) -> None:
-    """Poll any FX/commodity asset from OANDA every 30 seconds."""
+    """Poll any FX/commodity asset from OANDA every 30 seconds (Kotegawa 5M feed)."""
     from data.oanda_feed import get_candles, is_configured
     if not is_configured():
-        logger.warning(f"[main] OANDA_API_KEY not set — {asset} feed disabled. "
-                       "Add OANDA_API_KEY to .env to activate.")
+        logger.warning(f"[main] OANDA_API_KEY not set — {asset} Kotegawa feed disabled.")
         return
-    logger.info(f"[main] {asset} feed starting via OANDA REST API.")
+    logger.info(f"[main] {asset} Kotegawa feed starting via OANDA REST API.")
     while not _shutdown_event.is_set():
         try:
             df = get_candles(asset, granularity="M5", count=200)
@@ -104,6 +103,91 @@ async def fx_polling_loop(engine: TradingEngine, asset: str) -> None:
         except Exception as exc:
             logger.warning(f"[main] {asset} OANDA poll error: {exc}")
         await asyncio.sleep(30)
+
+
+# VENOM timeframe configs: (ltf_gran, htf_gran, ltf_label, htf_label, poll_secs)
+_VENOM_TF_CONFIGS = [
+    ("H1",  "D",   "1H",  "D",   3600),   # Swing
+    ("M15", "H4",  "15M", "4H",  900),    # Intraday
+    ("M5",  "H1",  "5M",  "1H",  300),    # Scalp
+]
+
+# Per-asset, per-TF state machine instances  {(asset, ltf): VenomStrategy}
+_VENOM_MACHINES: dict[tuple, object] = {}
+
+
+async def venom_polling_loop(asset: str, ltf_gran: str, htf_gran: str,
+                              ltf_label: str, poll_secs: int) -> None:
+    """
+    Dedicated VENOM polling loop for one asset × TF combination.
+    Places orders directly on PAPER_BROKER when a signal fires.
+    """
+    from data.oanda_feed import get_candles, is_configured
+    from strategy.venom import VenomStrategy
+    from risk.manager import check_max_positions
+
+    if not is_configured():
+        logger.warning(f"[venom] OANDA key not set — {asset}/{ltf_label} VENOM disabled.")
+        return
+
+    key = (asset, ltf_label)
+    _VENOM_MACHINES[key] = VenomStrategy(
+        asset=asset, ltf=ltf_label, htf=ltf_gran.replace("H4", "4H").replace("H1", "1H"),
+        rr=2.0,
+    )
+    logger.info(f"[venom] {asset} {ltf_label}/{htf_gran} loop started.")
+
+    global _trade_count
+    while not _shutdown_event.is_set():
+        try:
+            ltf_df = get_candles(asset, granularity=ltf_gran, count=200)
+            htf_df = get_candles(asset, granularity=htf_gran, count=50)
+
+            if ltf_df.empty or htf_df.empty:
+                await asyncio.sleep(poll_secs)
+                continue
+
+            machine = _VENOM_MACHINES[key]
+            sig = machine.process(ltf_df, htf_df)
+
+            if sig and sig.is_valid:
+                if not check_max_positions(PAPER_BROKER.open_position_count):
+                    logger.debug(f"[venom] Max positions — skipping {asset} {ltf_label}")
+                    machine.on_trade_closed()
+                    await asyncio.sleep(poll_secs)
+                    continue
+
+                from risk.manager import position_size
+                from risk.scaling import scale_position
+                equity = current_equity()
+                raw_sz = position_size(equity, sig.price)
+                final_sz = scale_position(raw_sz, equity)
+
+                if final_sz > 0:
+                    # Compute TP/SL percentages from absolute prices
+                    tp_pct = abs(sig.tp_price - sig.price) / sig.price if sig.tp_price else 0.02
+                    sl_pct = abs(sig.sl_price - sig.price) / sig.price if sig.sl_price else 0.015
+                    pos = PAPER_BROKER.buy(
+                        asset, sig.price, final_sz,
+                        tp_pct=tp_pct, sl_pct=sl_pct,
+                        direction=sig.direction,
+                        strategy="VENOM",
+                        score=sig.score,
+                    )
+                    if pos:
+                        from core.performance import record_trade as _rt
+                        _trade_count += 1
+                        update_state(trade_count=_trade_count, equity=PAPER_BROKER.equity)
+                        send_alert(
+                            f"⚔️ VENOM {sig.direction} {asset} {ltf_label} "
+                            f"@ {sig.price:.5f} | TP={sig.tp_price:.5f} "
+                            f"SL={sig.sl_price:.5f} | size={final_sz:.4f}"
+                        )
+
+        except Exception as exc:
+            logger.warning(f"[venom] {asset}/{ltf_label} poll error: {exc}")
+
+        await asyncio.sleep(poll_secs)
 
 
 # ─── Background tasks ─────────────────────────────────────────────────────────
@@ -261,10 +345,26 @@ async def run() -> None:
         tasks.append(asyncio.create_task(xrp_orderbook_loop(engine), name="xrp_ob"))
         tasks.append(asyncio.create_task(xrp_kline_loop(engine), name="xrp_klines"))
 
+    # Kotegawa OANDA feed (5M) for all enabled FX/commodity assets
     for fx_asset in [a for a in enabled_assets() if is_fx(a)]:
         tasks.append(asyncio.create_task(
             fx_polling_loop(engine, fx_asset), name=f"oanda_{fx_asset.lower()}"
         ))
+
+    # VENOM multi-TF loops (one per asset × TF config)
+    from db.strategy_store import get_all_strategies as _get_strats
+    venom_cfg = next((s for s in _get_strats() if s["name"] == "VENOM" and s.get("enabled")), None)
+    if venom_cfg:
+        venom_assets = [a.strip() for a in (venom_cfg.get("assets") or "").split(",") if a.strip()]
+        active = set(enabled_assets())
+        for v_asset in [a for a in venom_assets if a in active]:
+            for ltf_g, htf_g, ltf_l, htf_l, poll_s in _VENOM_TF_CONFIGS:
+                tasks.append(asyncio.create_task(
+                    venom_polling_loop(v_asset, ltf_g, htf_g, ltf_l, poll_s),
+                    name=f"venom_{v_asset.lower()}_{ltf_l.lower()}"
+                ))
+        if venom_assets:
+            logger.info(f"[main] VENOM loops started: {venom_assets} × 3 TFs")
 
     # Engine
     tasks.append(asyncio.create_task(engine.run(), name="engine"))

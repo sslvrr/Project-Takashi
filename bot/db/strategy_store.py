@@ -8,12 +8,14 @@ from db.models import StrategyConfig
 from db.session import get_session
 from core.logger import logger
 
+_ALL_ASSETS = "XRP,EURUSD,XAUUSD,BTC,ETH"
+
 _DEFAULTS = [
     {
         "name": "KOTEGAWA",
         "version": "v1.0",
         "timeframe": "5M",
-        "assets": "XRP,EURUSD",
+        "assets": _ALL_ASSETS,
         "description": (
             "Kotegawa mean-reversion. Buys RSI oversold conditions with "
             "volume-spike and order-book imbalance confirmation. Named after "
@@ -31,8 +33,8 @@ _DEFAULTS = [
     {
         "name": "VENOM",
         "version": "v1.0",
-        "timeframe": "1H/D",
-        "assets": "XAUUSD",
+        "timeframe": "5M/1H | 15M/4H | 1H/D",
+        "assets": _ALL_ASSETS,
         "description": (
             "ICT Multi-Timeframe Sweep + FVG strategy. Detects HTF liquidity "
             "sweep → LTF secondary sweep → FVG reclaim → CHOC confirmation → "

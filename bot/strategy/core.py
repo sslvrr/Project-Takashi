@@ -39,9 +39,16 @@ class Signal:
     spoofing: bool
     ml_prediction: Optional[int] = None
     timestamp: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
+    # Extended fields for non-Kotegawa strategies
+    strategy: Optional[str] = None
+    sl_price: Optional[float] = None
+    tp_price: Optional[float] = None
 
     @property
     def is_valid(self) -> bool:
+        if self.strategy and self.strategy != "KOTEGAWA":
+            # VENOM and other strategies gate on direction + no spoofing
+            return self.direction in ("BUY", "SELL") and not self.spoofing
         return self.direction == "BUY" and not self.spoofing
 
     def to_dict(self) -> dict:
