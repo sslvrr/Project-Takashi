@@ -27,6 +27,8 @@ class Trade(Base):
     score = Column(Integer, nullable=True)
     mode = Column(String(10), nullable=False, default="PAPER")  # PAPER | LIVE
     reason = Column(String(50), nullable=True)             # TP | SL | MANUAL
+    strategy = Column(String(20), nullable=True)           # OB | REV | MOM | BRK | PULL
+    r_multiple = Column(Float, nullable=True)
     opened_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     closed_at = Column(DateTime(timezone=True), nullable=True)
 

@@ -141,6 +141,9 @@ class TradingEngine:
                     asset, signal.price, final_sz,
                     tp_pct=settings.TAKE_PROFIT_PCT,
                     sl_pct=settings.STOP_LOSS_PCT,
+                    direction=getattr(signal, "signal", "BUY") or "BUY",
+                    score=getattr(signal, "score", None),
+                    strategy=getattr(signal, "strategy", None),
                 )
                 if pos:
                     self.frequency_guard.record_trade(asset)

@@ -5,6 +5,7 @@ without touching real capital. Used as the default MODE=PAPER executor.
 
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Optional
 from execution.slippage import apply_slippage
 from core.logger import logger
@@ -18,6 +19,9 @@ class Position:
     size: float
     tp: float
     sl: float
+    direction: str = "BUY"
+    strategy: Optional[str] = None
+    score: Optional[int] = None
     opened_at: float = field(default_factory=time.time)
 
     @property
@@ -42,6 +46,9 @@ class PaperBroker:
         size: float,
         tp_pct: float = 0.02,
         sl_pct: float = 0.015,
+        direction: str = "BUY",
+        strategy: Optional[str] = None,
+        score: Optional[int] = None,
     ) -> Optional[Position]:
         fill_price = apply_slippage(price, is_buy=True, asset=symbol)
         cost = fill_price * size
@@ -59,6 +66,9 @@ class PaperBroker:
             size=size,
             tp=fill_price * (1 + tp_pct),
             sl=fill_price * (1 - sl_pct),
+            direction=direction,
+            strategy=strategy,
+            score=score,
         )
         self.positions.append(pos)
         self.trade_log.append({
@@ -75,6 +85,8 @@ class PaperBroker:
     def close(self, pos: Position, price: float, reason: str = "manual") -> float:
         fill_price = apply_slippage(price, is_buy=False, asset=pos.symbol)
         pnl = (fill_price - pos.entry) * pos.size
+        risk = abs((pos.entry - pos.sl) * pos.size) if pos.sl else None
+        r_multiple = round(pnl / risk, 2) if risk else None
         self.balance += pos.size * fill_price
         self.positions.remove(pos)
         self.trade_log.append({
@@ -89,6 +101,32 @@ class PaperBroker:
             "balance_after": self.balance,
         })
         logger.info(f"[paper] CLOSE {pos.symbol} @ {fill_price:.5f} | PnL={pnl:+.4f} | reason={reason} | bal={self.balance:.2f}")
+
+        try:
+            from db.session import get_session
+            from db.models import Trade
+            with get_session() as session:
+                if session is not None:
+                    session.add(Trade(
+                        symbol=pos.symbol,
+                        direction=pos.direction,
+                        entry=pos.entry,
+                        exit=fill_price,
+                        size=pos.size,
+                        pnl=round(pnl, 6),
+                        tp=pos.tp,
+                        sl=pos.sl,
+                        score=pos.score,
+                        strategy=pos.strategy,
+                        r_multiple=r_multiple,
+                        mode="PAPER",
+                        reason=reason.upper(),
+                        opened_at=datetime.fromtimestamp(pos.opened_at, tz=timezone.utc),
+                        closed_at=datetime.now(timezone.utc),
+                    ))
+        except Exception as exc:
+            logger.warning(f"[paper] DB persist failed: {exc}")
+
         return pnl
 
     # ─── TP/SL sweep ─────────────────────────────────────────────────────────

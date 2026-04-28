@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     # Dashboard
     DASHBOARD_PORT: int = Field(default=8501)
 
+    # Starting capital and trade count — set from .env to preserve state across restarts
+    INITIAL_BALANCE: float = Field(default=1_000.0)
+    INITIAL_TRADE_COUNT: int = Field(default=0)
+
     @property
     def is_live(self) -> bool:
         return self.MODE == "LIVE"

@@ -49,13 +49,13 @@ import uvicorn
 
 # ─── Global state ─────────────────────────────────────────────────────────────
 
-PAPER_BROKER = PaperBroker(balance=1_000.0)
+PAPER_BROKER = PaperBroker(balance=settings.INITIAL_BALANCE)
 KILL_SWITCH = KillSwitch(max_drawdown=settings.MAX_DRAWDOWN)
 FEATURE_STORE = FeatureStore()
 MODEL = LGBMModel()
 
 _shutdown_event: asyncio.Event = None  # type: ignore[assignment]
-_trade_count = 0
+_trade_count = settings.INITIAL_TRADE_COUNT
 
 
 # ─── Signal handler ───────────────────────────────────────────────────────────
@@ -213,8 +213,8 @@ async def startup() -> None:
             server=settings.MT5_SERVER,
         )
 
-    # Seed initial equity into API state
-    update_state(equity=PAPER_BROKER.equity)
+    # Seed initial equity and trade count into API state
+    update_state(equity=PAPER_BROKER.equity, trade_count=_trade_count)
 
     # Deployment gate check
     if settings.is_live:

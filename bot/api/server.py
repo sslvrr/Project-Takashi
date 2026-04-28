@@ -163,8 +163,12 @@ def recent_trades(limit: int = 20):
         return {"trades": [
             {
                 "id": r.id, "symbol": r.symbol, "direction": r.direction,
-                "entry": r.entry, "exit": r.exit, "pnl": r.pnl,
-                "opened_at": str(r.opened_at), "reason": r.reason,
+                "entry": r.entry, "exit": r.exit, "size": r.size,
+                "pnl": r.pnl, "tp": r.tp, "sl": r.sl,
+                "score": r.score, "strategy": r.strategy,
+                "r_multiple": r.r_multiple,
+                "mode": r.mode, "reason": r.reason,
+                "opened_at": str(r.opened_at), "closed_at": str(r.closed_at),
             }
             for r in rows
         ]}

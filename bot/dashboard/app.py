@@ -7,7 +7,6 @@ import time
 import sys
 import os
 import requests
-import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
@@ -16,6 +15,12 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config.settings import settings
+from db.session import init_db, is_available as _db_available
+
+# Initialize DB engine once per process (Streamlit reruns the script but
+# Python modules are only imported once, so this is safe to guard with is_available)
+if not _db_available():
+    init_db()
 
 st.set_page_config(
     page_title="Project Takashi",
@@ -52,36 +57,29 @@ def load_trades() -> pd.DataFrame:
         from db.models import Trade
         with get_session() as session:
             if session is None:
-                return _demo_trades()
+                return pd.DataFrame()
             rows = session.query(Trade).order_by(Trade.id.asc()).all()
             if not rows:
-                return _demo_trades()
+                return pd.DataFrame()
             return pd.DataFrame([{
+                "db_id": r.id,
                 "symbol": r.symbol, "direction": r.direction,
                 "entry": r.entry, "exit": r.exit, "size": r.size,
-                "pnl": r.pnl or 0.0, "score": r.score,
+                "pnl": r.pnl or 0.0, "tp": r.tp, "sl": r.sl,
+                "score": r.score, "strategy": r.strategy,
+                "r_multiple": r.r_multiple,
                 "reason": r.reason, "mode": r.mode,
-                "opened_at": r.opened_at,
+                "opened_at": r.opened_at, "closed_at": r.closed_at,
             } for r in rows])
     except Exception:
-        return _demo_trades()
-
-
-def _demo_trades() -> pd.DataFrame:
-    rng = np.random.default_rng(42)
-    n = 80
-    pnl = rng.normal(0.003, 0.012, n)
-    dates = pd.date_range(end=pd.Timestamp.now(tz="UTC"), periods=n, freq="2h", tz="UTC")
-    return pd.DataFrame({
-        "symbol": rng.choice(["XRP"], n), "direction": "BUY",
-        "pnl": pnl, "score": rng.integers(5, 9, n),
-        "reason": rng.choice(["TP", "SL"], n, p=[0.62, 0.38]),
-        "mode": "PAPER", "opened_at": dates,
-    })
+        return pd.DataFrame()
 
 
 def compute_metrics(df: pd.DataFrame, start: float = 1_000.0) -> dict:
-    pnl = df["pnl"].dropna()
+    if df.empty or "pnl" not in df.columns:
+        pnl = pd.Series([], dtype=float)
+    else:
+        pnl = df["pnl"].dropna()
     if len(pnl) == 0:
         return {"total_pnl": 0, "trades": 0, "win_rate": 0, "max_drawdown": 0,
                 "profit_factor": 0, "sharpe": 0, "avg_win": 0, "avg_loss": 0,
@@ -250,19 +248,117 @@ with tab1:
             fig4.update_layout(height=260, margin=dict(l=0, r=0, t=10, b=0))
             st.plotly_chart(fig4, use_container_width=True)
 
-    st.subheader("Recent Trades")
-    if len(df) > 0:
-        df2 = df.copy()
-        df2["equity"] = df2["pnl"].dropna().cumsum() + 1_000
-        if "opened_at" in df2.columns:
-            df2["time"] = pd.to_datetime(df2["opened_at"], utc=True, errors="coerce").dt.strftime("%m-%d %H:%M")
-        df2 = df2.tail(30).sort_index(ascending=False)
-        df2["equity"] = df2["equity"].map(lambda v: f"${v:,.2f}" if pd.notna(v) else "—")
-        df2["pnl"]    = df2["pnl"].map(lambda v: f"${v:+.4f}" if pd.notna(v) else "—")
-        cols = [c for c in ["time", "symbol", "direction", "entry", "exit", "pnl", "equity", "score", "reason"] if c in df2.columns]
-        st.dataframe(df2[cols], use_container_width=True)
+    # ── Trade History ─────────────────────────────────────────────────────────
+    st.subheader("Trade History")
+    if len(df) == 0:
+        st.info("No closed trades yet — open positions settle here once they hit TP, SL, or manual close.")
     else:
-        st.info("No trades yet — signals fire once 30 candles buffer (~2.5 hrs).")
+        from zoneinfo import ZoneInfo
+        eastern = ZoneInfo("America/New_York")
+
+        tj = df.copy().reset_index(drop=True)
+
+        # Sequential trade ID
+        tj["#"] = [f"T-{(i + 1):04d}" for i in range(len(tj))]
+
+        # Time in EST
+        tj["Time (EST)"] = (
+            pd.to_datetime(tj["opened_at"], utc=True, errors="coerce")
+            .dt.tz_convert(eastern)
+            .dt.strftime("%-m/%-d, %H:%M")
+        )
+
+        # Direction label
+        dir_map = {"BUY": "LONG", "SELL": "SHORT"}
+        tj["Dir"] = tj["direction"].str.upper().map(dir_map).fillna(tj["direction"].str.upper())
+
+        # Strategy
+        tj["Strategy"] = tj["strategy"].fillna("—").str.upper() if "strategy" in tj.columns else "—"
+
+        # Pips: (exit − entry) × 10000, shown as signed 1dp string
+        if "entry" in tj.columns and "exit" in tj.columns:
+            tj["Pips"] = ((tj["exit"] - tj["entry"]) * 10_000).apply(
+                lambda v: f"{v:+.1f}" if pd.notna(v) else "—"
+            )
+        else:
+            tj["Pips"] = "—"
+
+        # R-multiple
+        if "r_multiple" in tj.columns:
+            tj["R"] = tj["r_multiple"].apply(
+                lambda v: f"{v:+.2f}R" if pd.notna(v) else "—"
+            )
+        else:
+            tj["R"] = "—"
+
+        # P&L
+        tj["P&L"] = tj["pnl"].apply(lambda v: f"${v:+.2f}" if pd.notna(v) else "—")
+
+        # Score (stored 0-10, display as %)
+        if "score" in tj.columns:
+            tj["Score"] = tj["score"].apply(
+                lambda v: f"{int(v) * 10}%" if pd.notna(v) and v is not None else "—"
+            )
+        else:
+            tj["Score"] = "—"
+
+        # Result
+        tj["Result"] = tj["pnl"].apply(
+            lambda v: "WIN" if pd.notna(v) and v > 0 else ("LOSS" if pd.notna(v) and v < 0 else "FLAT")
+        )
+
+        # Reason label
+        reason_map = {"TP": "TARGET", "SL": "STOP", "MANUAL": "MANUAL"}
+        if "reason" in tj.columns:
+            tj["Reason"] = tj["reason"].str.upper().map(reason_map).fillna(tj["reason"].str.upper())
+        else:
+            tj["Reason"] = "—"
+
+        # Entry/Exit formatted
+        tj["Entry"] = tj["entry"].apply(lambda v: f"{v:.5f}" if pd.notna(v) else "—")
+        tj["Exit"]  = tj["exit"].apply(lambda v: f"{v:.5f}" if pd.notna(v) else "—")
+
+        # ── Filters ───────────────────────────────────────────────────────────
+        strategies = sorted([s for s in tj["Strategy"].unique() if s not in ("—",)])
+        filter_opts = ["All"] + strategies + ["Wins", "Losses"]
+        selected = st.radio(
+            "Filter", filter_opts, horizontal=True, label_visibility="collapsed",
+            key="trade_filter"
+        )
+
+        view = tj.copy()
+        if selected == "Wins":
+            view = view[view["Result"] == "WIN"]
+        elif selected == "Losses":
+            view = view[view["Result"] == "LOSS"]
+        elif selected not in ("All",):
+            view = view[view["Strategy"] == selected]
+
+        view = view.sort_index(ascending=False)
+
+        display_cols = ["#", "Time (EST)", "Strategy", "Dir", "Entry", "Exit",
+                        "Pips", "R", "P&L", "Score", "Result", "Reason"]
+
+        # Row colour: green tint for WIN, red tint for LOSS
+        def _row_color(row):
+            if row["Result"] == "WIN":
+                return ["background-color: rgba(0,204,150,0.12)"] * len(row)
+            if row["Result"] == "LOSS":
+                return ["background-color: rgba(239,85,59,0.12)"] * len(row)
+            return [""] * len(row)
+
+        styled = view[display_cols].style.apply(_row_color, axis=1)
+        st.dataframe(styled, use_container_width=True, hide_index=True)
+
+        # ── Footer summary ────────────────────────────────────────────────────
+        w = len(view[view["Result"] == "WIN"])
+        l = len(view[view["Result"] == "LOSS"])
+        wr = w / len(view) * 100 if len(view) > 0 else 0.0
+        total = tj["pnl"].sum()
+        st.caption(
+            f"Showing {len(view)} trades | {w}W {l}L | WR {wr:.1f}% | "
+            f"Total P&L ${total:+.2f}"
+        )
 
     with st.sidebar:
         st.metric("Avg Win",  f"${m['avg_win']:.4f}")
