@@ -50,7 +50,8 @@ class PaperBroker:
         strategy: Optional[str] = None,
         score: Optional[int] = None,
     ) -> Optional[Position]:
-        fill_price = apply_slippage(price, is_buy=True, asset=symbol)
+        is_long = direction != "SELL"
+        fill_price = apply_slippage(price, is_buy=is_long, asset=symbol)
         cost = fill_price * size
 
         if cost > self.balance:
@@ -59,13 +60,19 @@ class PaperBroker:
 
         self.balance -= cost
         self._id_counter += 1
+        if is_long:
+            tp = fill_price * (1 + tp_pct)
+            sl = fill_price * (1 - sl_pct)
+        else:
+            tp = fill_price * (1 - tp_pct)
+            sl = fill_price * (1 + sl_pct)
         pos = Position(
             id=f"P{self._id_counter}",
             symbol=symbol,
             entry=fill_price,
             size=size,
-            tp=fill_price * (1 + tp_pct),
-            sl=fill_price * (1 - sl_pct),
+            tp=tp,
+            sl=sl,
             direction=direction,
             strategy=strategy,
             score=score,
@@ -73,18 +80,19 @@ class PaperBroker:
         self.positions.append(pos)
         self.trade_log.append({
             "id": pos.id,
-            "action": "BUY",
+            "action": direction,
             "symbol": symbol,
             "price": fill_price,
             "size": size,
             "balance_after": self.balance,
         })
-        logger.info(f"[paper] BUY {symbol} @ {fill_price:.5f} x{size} | TP={pos.tp:.5f} SL={pos.sl:.5f} | bal={self.balance:.2f}")
+        logger.info(f"[paper] {direction} {symbol} @ {fill_price:.5f} x{size} | TP={pos.tp:.5f} SL={pos.sl:.5f} | bal={self.balance:.2f}")
         return pos
 
     def close(self, pos: Position, price: float, reason: str = "manual") -> float:
-        fill_price = apply_slippage(price, is_buy=False, asset=pos.symbol)
-        pnl = (fill_price - pos.entry) * pos.size
+        is_long = pos.direction != "SELL"
+        fill_price = apply_slippage(price, is_buy=not is_long, asset=pos.symbol)
+        pnl = ((fill_price - pos.entry) if is_long else (pos.entry - fill_price)) * pos.size
         risk = abs((pos.entry - pos.sl) * pos.size) if pos.sl else None
         r_multiple = round(pnl / risk, 2) if risk else None
         self.balance += pos.size * fill_price
@@ -143,10 +151,16 @@ class PaperBroker:
             price = current_prices.get(pos.symbol)
             if price is None:
                 continue
-            if price >= pos.tp:
-                to_close.append((pos, price, "TP"))
-            elif price <= pos.sl:
-                to_close.append((pos, price, "SL"))
+            if pos.direction == "SELL":
+                if price <= pos.tp:
+                    to_close.append((pos, price, "TP"))
+                elif price >= pos.sl:
+                    to_close.append((pos, price, "SL"))
+            else:
+                if price >= pos.tp:
+                    to_close.append((pos, price, "TP"))
+                elif price <= pos.sl:
+                    to_close.append((pos, price, "SL"))
 
         for pos, price, reason in to_close:
             pnls.append(self.close(pos, price, reason))

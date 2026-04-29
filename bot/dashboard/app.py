@@ -163,7 +163,7 @@ else:
 
 eq1, eq2, eq3 = st.columns(3)
 eq1.metric("Live Equity", f"${live_equity:,.2f}",
-           delta=f"${live_equity - 1_000:+,.2f}" if live_equity else None)
+           delta=round(live_equity - 1_000, 2) if live_equity else None)
 eq2.metric("Starting Capital", "$1,000.00")
 eq3.metric("Return", f"{((live_equity / 1_000) - 1) * 100:+.3f}%" if live_equity else "0.000%")
 
@@ -275,11 +275,16 @@ with tab1:
         # Strategy
         tj["Strategy"] = tj["strategy"].fillna("—").str.upper() if "strategy" in tj.columns else "—"
 
-        # Pips: (exit − entry) × 10000, shown as signed 1dp string
+        # Pips: signed price movement in the trade's favour × 10000
         if "entry" in tj.columns and "exit" in tj.columns:
-            tj["Pips"] = ((tj["exit"] - tj["entry"]) * 10_000).apply(
-                lambda v: f"{v:+.1f}" if pd.notna(v) else "—"
-            )
+            def _calc_pips(row):
+                if pd.isna(row.get("exit")):
+                    return "—"
+                diff = (row["exit"] - row["entry"]) * 10_000
+                if row.get("direction", "BUY") == "SELL":
+                    diff = -diff
+                return f"{diff:+.1f}"
+            tj["Pips"] = tj.apply(_calc_pips, axis=1)
         else:
             tj["Pips"] = "—"
 
@@ -401,22 +406,27 @@ with tab2:
         st.caption(f"{len(positions)} open position(s) — refreshes every 30s")
 
         for p in positions:
-            entry   = p.get("entry", 0)
-            current = p.get("current_price", 0)
-            tp      = p.get("tp", 0)
-            sl      = p.get("sl", 0)
-            size    = p.get("size", 0)
-            upnl    = p.get("unrealized_pnl", 0)
-            age_s   = p.get("age_seconds", 0)
-            age_str = f"{age_s // 60}m {age_s % 60}s"
-            upnl_pct = ((current - entry) / entry * 100) if entry else 0
+            entry     = p.get("entry", 0)
+            current   = p.get("current_price", 0)
+            tp        = p.get("tp", 0)
+            sl        = p.get("sl", 0)
+            size      = p.get("size", 0)
+            upnl      = p.get("unrealized_pnl", 0)
+            age_s     = p.get("age_seconds", 0)
+            direction = p.get("direction", "BUY")
+            age_str   = f"{age_s // 60}m {age_s % 60}s"
+            if entry:
+                upnl_pct = ((current - entry) / entry * 100) if direction != "SELL" \
+                           else ((entry - current) / entry * 100)
+            else:
+                upnl_pct = 0
             pos_id  = p.get("id", "")
 
             pnl_color = "🟢" if upnl >= 0 else "🔴"
 
             with st.container(border=True):
                 c1, c2, c3, c4, c5, c6 = st.columns([2, 2, 2, 2, 2, 1])
-                c1.metric("Symbol",      p.get("symbol", ""))
+                c1.metric("Symbol",      f"{p.get('symbol', '')} ({direction})")
                 c2.metric("Entry",       f"${entry:.5f}")
                 c3.metric("Current",     f"${current:.5f}", delta=f"{upnl_pct:+.3f}%")
                 c4.metric("Unreal. PnL", f"{pnl_color} ${upnl:+.4f}")
@@ -430,16 +440,25 @@ with tab2:
                         st.error("Close failed")
 
                 # Visual: where is current price between SL and TP?
-                if tp > sl and sl > 0:
+                if direction != "SELL" and tp > sl > 0:
                     price_range = tp - sl
                     pos_in_range = max(0.0, min(1.0, (current - sl) / price_range))
                     st.progress(pos_in_range,
                                 text=f"SL ${sl:.5f}  ←  current ${current:.5f}  →  TP ${tp:.5f}")
+                elif direction == "SELL" and sl > tp > 0:
+                    price_range = sl - tp
+                    pos_in_range = max(0.0, min(1.0, (sl - current) / price_range))
+                    st.progress(pos_in_range,
+                                text=f"TP ${tp:.5f}  ←  current ${current:.5f}  →  SL ${sl:.5f}")
 
                 col_info1, col_info2, col_info3 = st.columns(3)
                 col_info1.caption(f"Size: {size}")
-                col_info2.caption(f"TP dist: +{((tp - entry)/entry*100):.2f}%")
-                col_info3.caption(f"SL dist: -{((entry - sl)/entry*100):.2f}%")
+                if direction != "SELL":
+                    col_info2.caption(f"TP dist: +{((tp - entry)/entry*100):.2f}%")
+                    col_info3.caption(f"SL dist: -{((entry - sl)/entry*100):.2f}%")
+                else:
+                    col_info2.caption(f"TP dist: -{((entry - tp)/entry*100):.2f}%")
+                    col_info3.caption(f"SL dist: +{((sl - entry)/entry*100):.2f}%")
     else:
         st.info("No open positions right now.")
         st.caption("Positions appear here the moment the bot enters a paper trade. Each card updates every 30s with live price and unrealized P&L.")

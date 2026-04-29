@@ -14,16 +14,17 @@ def final_signal(
     confidence_threshold: float = 0.55,
 ) -> Optional[str]:
     """
-    Return "BUY" only when:
-    - Rule engine says BUY
-    - ML model predicts 1 (or no model available — pass-through)
-    - ML probability exceeds confidence_threshold
+    Return the rule signal when both layers agree (or no model is available).
+    SELL signals bypass ML (Kotegawa never sells; VENOM uses its own loop).
     """
-    if rule_signal != "BUY":
+    if rule_signal not in ("BUY", "SELL"):
         return None
 
+    # SELL signals are directional — ML was trained for BUY only, pass through
+    if rule_signal == "SELL":
+        return "SELL"
+
     if ml_prediction is None:
-        # No model — allow rule signal through
         return rule_signal
 
     if ml_prediction == 1 and ml_proba >= confidence_threshold:
