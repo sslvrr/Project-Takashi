@@ -161,11 +161,12 @@ elif bot_running:
 else:
     st.warning("🟡 Bot offline — dashboard showing cached data")
 
+_start_cap = settings.INITIAL_BALANCE
 eq1, eq2, eq3 = st.columns(3)
 eq1.metric("Live Equity", f"${live_equity:,.2f}",
-           delta=round(live_equity - 1_000, 2) if live_equity else None)
-eq2.metric("Starting Capital", "$1,000.00")
-eq3.metric("Return", f"{((live_equity / 1_000) - 1) * 100:+.3f}%" if live_equity else "0.000%")
+           delta=round(live_equity - _start_cap, 2) if live_equity else None)
+eq2.metric("Starting Capital", f"${_start_cap:,.2f}")
+eq3.metric("Return", f"{((live_equity / _start_cap) - 1) * 100:+.3f}%" if live_equity else "0.000%")
 
 if start_time:
     try:
