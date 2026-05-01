@@ -40,8 +40,10 @@ from execution.coinbase_exec import CoinbaseExecutor
 from execution.mt5_exec import MT5Executor
 
 from risk.kill_switch import KillSwitch
+from risk.manager import DirectionGuard
 from strategy.model_lgbm import LGBMModel
 from strategy.training_pipeline import run_training
+from core.news import is_blackout
 
 from api.server import app as fastapi_app, update_state, update_positions, update_ml_status, pop_close_requests
 import uvicorn
@@ -49,10 +51,11 @@ import uvicorn
 
 # ─── Global state ─────────────────────────────────────────────────────────────
 
-PAPER_BROKER = PaperBroker(balance=settings.INITIAL_BALANCE)
-KILL_SWITCH = KillSwitch(max_drawdown=settings.MAX_DRAWDOWN)
-FEATURE_STORE = FeatureStore()
-MODEL = LGBMModel()
+PAPER_BROKER     = PaperBroker(balance=settings.INITIAL_BALANCE)
+KILL_SWITCH      = KillSwitch(max_drawdown=settings.MAX_DRAWDOWN)
+DIRECTION_GUARD  = DirectionGuard(max_consec=2)
+FEATURE_STORE    = FeatureStore()
+MODEL            = LGBMModel()
 
 _shutdown_event: asyncio.Event = None  # type: ignore[assignment]
 _trade_count = settings.INITIAL_TRADE_COUNT
@@ -150,7 +153,18 @@ async def venom_polling_loop(asset: str, ltf_gran: str, htf_gran: str,
             machine = _VENOM_MACHINES[key]
             sig = machine.process(ltf_df, htf_df)
 
-            if sig and sig.is_valid:
+            if sig and sig.is_valid and sig.score >= settings.MIN_SIGNAL_SCORE:
+                # News blackout check
+                if is_blackout(asset):
+                    logger.info(f"[venom] {asset} {ltf_label} blocked — news blackout")
+                    await asyncio.sleep(poll_secs)
+                    continue
+
+                # Per-direction cooldown check
+                if not DIRECTION_GUARD.can_trade(sig.direction):
+                    await asyncio.sleep(poll_secs)
+                    continue
+
                 if not check_max_positions(PAPER_BROKER.open_position_count):
                     logger.debug(f"[venom] Max positions — skipping {asset} {ltf_label}")
                     machine.on_trade_closed()
@@ -252,52 +266,72 @@ async def paper_exit_check_loop() -> None:
         await asyncio.sleep(5)
         try:
             ob = get_orderbook("XRP")
+
+            # ── Build live price map for all open positions ────────────────
+            prices: dict[str, float] = {}
+
             if ob:
                 bids = ob.get("bids", ob.get("b", []))
                 if bids:
-                    price = float(bids[0][0])
-                    closed = PAPER_BROKER.check_exits({"XRP": price})
-                    for pos, exit_price, reason, pnl in closed:
-                        record_trade(pnl)
-                        _trade_count += 1
-                        update_state(trade_count=_trade_count, equity=PAPER_BROKER.equity)
-                        _persist_trade_to_db(pos, exit_price, pnl, reason)
+                    prices["XRP"] = float(bids[0][0])
 
-                        if KILL_SWITCH.update(PAPER_BROKER.equity):
-                            send_alert("🔴 KILL SWITCH TRIGGERED — Halting all trading.")
-                            _shutdown_event.set()
-                            break
+            # Fetch OANDA prices for open FX/commodity positions (R4)
+            _crypto = {"XRP", "BTC", "ETH", "SOL"}
+            fx_needed = {p.symbol for p in PAPER_BROKER.positions if p.symbol not in _crypto}
+            if fx_needed:
+                from data.oanda_feed import get_latest_price, is_configured as _oanda_ok
+                if _oanda_ok():
+                    for sym in fx_needed:
+                        tick = get_latest_price(sym)
+                        if tick.get("mid"):
+                            prices[sym] = tick["mid"]
+
+            if prices:
+                closed = PAPER_BROKER.check_exits(prices)
+                for pos, exit_price, reason, pnl in closed:
+                    record_trade(pnl)
+                    DIRECTION_GUARD.record(pos.direction, pnl)
+                    _trade_count += 1
+                    update_state(trade_count=_trade_count, equity=PAPER_BROKER.equity)
+                    _persist_trade_to_db(pos, exit_price, pnl, reason)
+
+                    if KILL_SWITCH.update(PAPER_BROKER.equity):
+                        send_alert("🔴 KILL SWITCH TRIGGERED — Halting all trading.")
+                        _shutdown_event.set()
+                        break
 
                 # Manual close requests from dashboard
                 for req_id in pop_close_requests():
                     for pos in list(PAPER_BROKER.positions):
                         if pos.id == req_id:
-                            pnl = PAPER_BROKER.close(pos, price, reason="manual")
+                            close_px = prices.get(pos.symbol, list(prices.values())[0] if prices else 0.0)
+                            pnl = PAPER_BROKER.close(pos, close_px, reason="manual")
                             record_trade(pnl)
+                            DIRECTION_GUARD.record(pos.direction, pnl)
                             _trade_count += 1
-                            _persist_trade_to_db(pos, price, pnl, "manual")
-                            send_alert(f"🔒 MANUAL CLOSE {pos.symbol} @ ${price:.5f} | PnL ${pnl:+.4f}")
+                            _persist_trade_to_db(pos, close_px, pnl, "manual")
+                            send_alert(f"🔒 MANUAL CLOSE {pos.symbol} @ {close_px:.5f} | PnL ${pnl:+.4f}")
                             break
 
-                # Keep equity fresh even with no trades
-                update_state(equity=PAPER_BROKER.equity)
+            # Keep equity and positions fresh
+            update_state(equity=PAPER_BROKER.equity)
+            KILL_SWITCH.update(PAPER_BROKER.equity)
 
-                current_price = price if bids else 0.0
-                update_positions([
-                    {
-                        "id": p.id, "symbol": p.symbol,
-                        "direction": p.direction,
-                        "entry": round(p.entry, 5), "size": round(p.size, 4),
-                        "tp": round(p.tp, 5), "sl": round(p.sl, 5),
-                        "age_seconds": int(p.age_seconds),
-                        "current_price": round(current_price, 5),
-                        "unrealized_pnl": round(
-                            (current_price - p.entry) * p.size if p.direction != "SELL"
-                            else (p.entry - current_price) * p.size, 4
-                        ),
-                    }
-                    for p in PAPER_BROKER.positions
-                ])
+            update_positions([
+                {
+                    "id": p.id, "symbol": p.symbol,
+                    "direction": p.direction,
+                    "entry": round(p.entry, 5), "size": round(p.size, 4),
+                    "tp": round(p.tp, 5), "sl": round(p.sl, 5),
+                    "age_seconds": int(p.age_seconds),
+                    "current_price": round(prices.get(p.symbol, 0.0), 5),
+                    "unrealized_pnl": round(
+                        (prices.get(p.symbol, p.entry) - p.entry) * p.size if p.direction != "SELL"
+                        else (p.entry - prices.get(p.symbol, p.entry)) * p.size, 4
+                    ),
+                }
+                for p in PAPER_BROKER.positions
+            ])
         except Exception as exc:
             logger.debug(f"[main] Exit check error: {exc}")
 
