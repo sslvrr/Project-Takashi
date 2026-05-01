@@ -64,6 +64,7 @@ class TradingEngine:
             try:
                 asset = await asyncio.wait_for(self.strategy_queue.get(), timeout=5.0)
             except asyncio.TimeoutError:
+                heartbeat()
                 continue
 
             df = self._dfs.get(asset)
@@ -141,9 +142,6 @@ class TradingEngine:
                     asset, signal.price, final_sz,
                     tp_pct=settings.TAKE_PROFIT_PCT,
                     sl_pct=settings.STOP_LOSS_PCT,
-                    direction=getattr(signal, "signal", "BUY") or "BUY",
-                    score=getattr(signal, "score", None),
-                    strategy=getattr(signal, "strategy", None),
                 )
                 if pos:
                     self.frequency_guard.record_trade(asset)

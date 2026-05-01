@@ -5,7 +5,6 @@ without touching real capital. Used as the default MODE=PAPER executor.
 
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from typing import Optional
 from execution.slippage import apply_slippage
 from core.logger import logger
@@ -20,8 +19,8 @@ class Position:
     tp: float
     sl: float
     direction: str = "BUY"
-    strategy: Optional[str] = None
-    score: Optional[int] = None
+    strategy: str = "KOTEGAWA"
+    score: int = 0
     opened_at: float = field(default_factory=time.time)
 
     @property
@@ -47,8 +46,8 @@ class PaperBroker:
         tp_pct: float = 0.02,
         sl_pct: float = 0.015,
         direction: str = "BUY",
-        strategy: Optional[str] = None,
-        score: Optional[int] = None,
+        strategy: str = "KOTEGAWA",
+        score: int = 0,
     ) -> Optional[Position]:
         is_long = direction != "SELL"
         fill_price = apply_slippage(price, is_buy=is_long, asset=symbol)
@@ -109,42 +108,16 @@ class PaperBroker:
             "balance_after": self.balance,
         })
         logger.info(f"[paper] CLOSE {pos.symbol} @ {fill_price:.5f} | PnL={pnl:+.4f} | reason={reason} | bal={self.balance:.2f}")
-
-        try:
-            from db.session import get_session
-            from db.models import Trade
-            with get_session() as session:
-                if session is not None:
-                    session.add(Trade(
-                        symbol=pos.symbol,
-                        direction=pos.direction,
-                        entry=pos.entry,
-                        exit=fill_price,
-                        size=pos.size,
-                        pnl=round(pnl, 6),
-                        tp=pos.tp,
-                        sl=pos.sl,
-                        score=pos.score,
-                        strategy=pos.strategy,
-                        r_multiple=r_multiple,
-                        mode="PAPER",
-                        reason=reason.upper(),
-                        opened_at=datetime.fromtimestamp(pos.opened_at, tz=timezone.utc),
-                        closed_at=datetime.now(timezone.utc),
-                    ))
-        except Exception as exc:
-            logger.warning(f"[paper] DB persist failed: {exc}")
-
         return pnl
 
     # ─── TP/SL sweep ─────────────────────────────────────────────────────────
 
-    def check_exits(self, current_prices: dict[str, float]) -> list[float]:
+    def check_exits(self, current_prices: dict[str, float]) -> list[tuple]:
         """
         Sweep all open positions against current prices.
-        Returns list of PnL values for closed positions.
+        Returns list of (pos, exit_price, reason, pnl) tuples for closed positions.
         """
-        pnls = []
+        closed = []
         to_close = []
 
         for pos in self.positions:
@@ -163,9 +136,10 @@ class PaperBroker:
                     to_close.append((pos, price, "SL"))
 
         for pos, price, reason in to_close:
-            pnls.append(self.close(pos, price, reason))
+            pnl = self.close(pos, price, reason)
+            closed.append((pos, price, reason, pnl))
 
-        return pnls
+        return closed
 
     # ─── Metrics ─────────────────────────────────────────────────────────────
 

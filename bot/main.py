@@ -215,6 +215,36 @@ async def model_retrain_loop() -> None:
             update_ml_status(MODEL.is_trained, FEATURE_STORE.size(), {})
 
 
+def _persist_trade_to_db(pos, exit_price: float, pnl: float, reason: str) -> None:
+    from db.session import get_session
+    from db.models import Trade as TradeModel
+    r_mult = round(pnl / (abs(pos.entry - pos.sl) * pos.size), 2) if pos.sl and pos.entry != pos.sl else None
+    try:
+        with get_session() as session:
+            if session is None:
+                return
+            t = TradeModel(
+                symbol=pos.symbol,
+                direction=pos.direction,
+                entry=pos.entry,
+                exit=exit_price,
+                size=pos.size,
+                pnl=round(pnl, 4),
+                tp=pos.tp,
+                sl=pos.sl,
+                score=pos.score,
+                mode="PAPER",
+                reason=reason,
+                strategy=pos.strategy,
+                r_multiple=r_mult,
+                opened_at=datetime.fromtimestamp(pos.opened_at, tz=timezone.utc),
+                closed_at=datetime.now(timezone.utc),
+            )
+            session.add(t)
+    except Exception as exc:
+        logger.warning(f"[db] Trade persist failed: {exc}")
+
+
 async def paper_exit_check_loop() -> None:
     """Every 5s sweep paper positions for TP/SL exits."""
     global _trade_count
@@ -226,11 +256,12 @@ async def paper_exit_check_loop() -> None:
                 bids = ob.get("bids", ob.get("b", []))
                 if bids:
                     price = float(bids[0][0])
-                    pnls = PAPER_BROKER.check_exits({"XRP": price})
-                    for pnl in pnls:
+                    closed = PAPER_BROKER.check_exits({"XRP": price})
+                    for pos, exit_price, reason, pnl in closed:
                         record_trade(pnl)
                         _trade_count += 1
                         update_state(trade_count=_trade_count, equity=PAPER_BROKER.equity)
+                        _persist_trade_to_db(pos, exit_price, pnl, reason)
 
                         if KILL_SWITCH.update(PAPER_BROKER.equity):
                             send_alert("🔴 KILL SWITCH TRIGGERED — Halting all trading.")
@@ -244,6 +275,7 @@ async def paper_exit_check_loop() -> None:
                             pnl = PAPER_BROKER.close(pos, price, reason="manual")
                             record_trade(pnl)
                             _trade_count += 1
+                            _persist_trade_to_db(pos, price, pnl, "manual")
                             send_alert(f"🔒 MANUAL CLOSE {pos.symbol} @ ${price:.5f} | PnL ${pnl:+.4f}")
                             break
 
