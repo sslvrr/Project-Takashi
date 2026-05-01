@@ -121,7 +121,7 @@ def _run_one(asset: str, ticker: str,
         if len(htf_win) < strat.htf_sw + 1:
             continue
 
-        sig = strat.process(ltf_win, htf_win)
+        sig = strat.process(ltf_win, htf_win, bar_time=bar_time)
         if sig is None:
             continue
 
